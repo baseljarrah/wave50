@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>Wave 50 - Milestone 4</title>
+  <title>Wave 50 - Milestone 5</title>
   <style>
     * {
       box-sizing: border-box;
@@ -42,7 +42,7 @@
       color: #ffffff;
       border: 1.5px solid #30363d;
       border-radius: 6px;
-      padding: 8px 11px;
+      padding: 8px 10px;
       font-size: 12px;
       font-weight: 800;
       cursor: pointer;
@@ -55,17 +55,49 @@
       color: #ffd166;
     }
 
-    /* Interactive Context Buy Button (Bottom Right for Right Thumb) */
+    /* Right-Thumb Action Controls (Dash + Contextual Buy) */
+    #dashBtn {
+      position: fixed;
+      bottom: 26px;
+      right: 22px;
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #3a86ff 0%, #1d4ed8 100%);
+      border: 3px solid #e0fbfc;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      box-shadow: 0 6px 20px rgba(58, 134, 255, 0.45);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 15;
+      cursor: pointer;
+    }
+    #dashBtn.cooldown {
+      background: rgba(22, 27, 34, 0.88);
+      border-color: #30363d;
+      color: #8b949e;
+      box-shadow: none;
+    }
+    #dashBtn:active {
+      transform: scale(0.93);
+    }
+
+    /* Contextual Buy Button (Sits just above Dash Button) */
     #interactBtn {
       position: fixed;
-      bottom: 28px;
+      bottom: 114px;
       right: 20px;
       background: linear-gradient(135deg, #06d6a0 0%, #059669 100%);
       color: #0d1117;
       border: 2px solid #ffffff;
       border-radius: 12px;
-      padding: 14px 18px;
-      font-size: 14px;
+      padding: 12px 16px;
+      font-size: 13px;
       font-weight: 900;
       box-shadow: 0 6px 20px rgba(0,0,0,0.6);
       display: none;
@@ -228,6 +260,7 @@
 <body>
 
 <div id="topRightControls">
+  <button class="hud-btn" id="sfxBtn">SFX: ON</button>
   <button class="hud-btn" id="zoomOutBtn">Zoom -</button>
   <button class="hud-btn" id="zoomInBtn">Zoom +</button>
   <button class="hud-btn dev-btn" id="devToggleBtn">DEV</button>
@@ -236,7 +269,13 @@
 <!-- Contextual Buy Button -->
 <button id="interactBtn">
   <span id="interactTitle">UPGRADE</span>
-  <span id="interactCost" style="font-size:12px;">500 PTS</span>
+  <span id="interactCost" style="font-size:11px;">500 PTS</span>
+</button>
+
+<!-- Right-Thumb Tactical Dash Button -->
+<button id="dashBtn">
+  <span id="dashLabel">DASH</span>
+  <span id="dashSub" style="font-size:10px; font-weight:700; opacity:0.85;">READY</span>
 </button>
 
 <!-- 3-Card Skill Upgrade Overlay -->
@@ -274,7 +313,7 @@
 <script>
 /**
  * ==========================================
- * WAVE 50 - MILESTONE 4: OBSTACLES, ECONOMY, TRAPS & DEV CONSOLE
+ * WAVE 50 - MILESTONE 5: DASH, ELEMENTALS, AUDIO & HIGH SCORES
  * ==========================================
  */
 
@@ -286,11 +325,65 @@ const modalWaveTitle = document.getElementById('modalWaveTitle');
 const interactBtn = document.getElementById('interactBtn');
 const interactTitle = document.getElementById('interactTitle');
 const interactCost = document.getElementById('interactCost');
+const dashBtn = document.getElementById('dashBtn');
+const dashLabel = document.getElementById('dashLabel');
+const dashSub = document.getElementById('dashSub');
+const sfxBtn = document.getElementById('sfxBtn');
 const devModal = document.getElementById('devModal');
 const devLog = document.getElementById('devLog');
 const devInput = document.getElementById('devInput');
 
-// --- 1. GAME CONFIGURATION ---
+// --- 1. WEB AUDIO SYNTHESIZER (Zero External Assets Required) ---
+const SFX = {
+  enabled: true,
+  ctx: null,
+  unlock() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) this.ctx = new AudioCtx();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  },
+  tone(freq, endFreq, duration, type = 'sine', gainVal = 0.08) {
+    if (!this.enabled || !this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, now + duration);
+      gain.gain.setValueAtTime(gainVal, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch (_) {}
+  },
+  shoot() { this.tone(520, 180, 0.06, 'triangle', 0.05); },
+  hit() { this.tone(240, 90, 0.05, 'square', 0.04); },
+  crit() { this.tone(880, 440, 0.09, 'sawtooth', 0.07); },
+  kill() { this.tone(360, 720, 0.11, 'sine', 0.07); },
+  dash() { this.tone(220, 660, 0.14, 'sine', 0.09); },
+  buy() { this.tone(440, 880, 0.18, 'triangle', 0.09); },
+  hurt() { this.tone(150, 55, 0.22, 'sawtooth', 0.12); },
+  waveClear() {
+    this.tone(523, 659, 0.18, 'triangle', 0.08);
+    setTimeout(() => this.tone(659, 784, 0.22, 'triangle', 0.08), 120);
+  }
+};
+
+sfxBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  SFX.unlock();
+  SFX.enabled = !SFX.enabled;
+  sfxBtn.textContent = `SFX: ${SFX.enabled ? 'ON' : 'OFF'}`;
+});
+
+// --- 2. GAME CONFIGURATION ---
 const CONFIG = {
   maxWaves: 50,
   world: {
@@ -311,7 +404,10 @@ const CONFIG = {
     attackRange: 440,
     arrowSpeed: 760,
     baseDamage: 15,
-    iFrameDuration: 0.45
+    iFrameDuration: 0.45,
+    dashCooldown: 3.0,
+    dashDuration: 0.18,
+    dashSpeedMult: 3.3
   },
   joystick: {
     maxRadius: 55,
@@ -369,7 +465,7 @@ const CONFIG = {
   }
 };
 
-// --- 2. SKILL POOL ---
+// --- 3. EXPANDED SKILL POOL (With Elementals & Crits) ---
 const SKILLS = [
   {
     id: 'front_arrow',
@@ -396,6 +492,30 @@ const SKILLS = [
     apply: (p) => { p.wallBounces += 1; }
   },
   {
+    id: 'blaze',
+    name: 'Blaze Arrows (Fire)',
+    desc: 'Ignites enemies for 3s, dealing burning damage every 0.5s.',
+    apply: (p) => { p.fireLevel += 1; }
+  },
+  {
+    id: 'frost',
+    name: 'Frostbite Arrows (Ice)',
+    desc: 'Chills enemies on hit, slowing their movement speed by 42%.',
+    apply: (p) => { p.iceLevel += 1; }
+  },
+  {
+    id: 'lightning',
+    name: 'Chain Lightning',
+    desc: 'Arrow hits arc high-voltage electricity to a nearby enemy.',
+    apply: (p) => { p.lightningLevel += 1; }
+  },
+  {
+    id: 'crit',
+    name: 'Deadeye Crit (+25%)',
+    desc: 'Increases critical hit chance by +25% for 2.2x damage.',
+    apply: (p) => { p.critChance = Math.min(1.0, p.critChance + 0.25); }
+  },
+  {
     id: 'damage_up',
     name: 'High Caliber (+30% DMG)',
     desc: 'Increases arrow damage by 30%.',
@@ -406,12 +526,6 @@ const SKILLS = [
     name: 'Rapid Fire (+25% SPD)',
     desc: 'Draws and fires arrows 25% faster.',
     apply: (p) => { p.fireRate = +(p.fireRate * 1.25).toFixed(2); }
-  },
-  {
-    id: 'move_speed',
-    name: 'Swift Stride (+15% Move)',
-    desc: 'Increases movement speed by 15% for easier dodging.',
-    apply: (p) => { p.speed = Math.round(p.speed * 1.15); }
   },
   {
     id: 'vampirism',
@@ -430,7 +544,7 @@ const SKILLS = [
   }
 ];
 
-// --- 3. CORE STATE ---
+// --- 4. CORE STATE & LOCALSTORAGE HIGH SCORES ---
 const state = {
   screenW: window.innerWidth,
   screenH: window.innerHeight,
@@ -442,6 +556,8 @@ const state = {
   devOpen: false,
   godMode: false,
   wave: 1,
+  bestWave: parseInt(localStorage.getItem('wave50_best_wave') || '1', 10),
+  bestKills: parseInt(localStorage.getItem('wave50_best_kills') || '0', 10),
   points: 0,
   waveEnemiesToSpawn: 0,
   waveTotalEnemies: 0,
@@ -461,14 +577,26 @@ const state = {
   enemies: [],
   pickups: [],
   floatingTexts: [],
-  particles: []
+  particles: [],
+  ghosts: [],
+  lightningBolts: []
 };
+
+function saveHighScores() {
+  if (state.wave > state.bestWave) {
+    state.bestWave = state.wave;
+    localStorage.setItem('wave50_best_wave', String(state.bestWave));
+  }
+  if (state.kills > state.bestKills) {
+    state.bestKills = state.kills;
+    localStorage.setItem('wave50_best_kills', String(state.bestKills));
+  }
+}
 
 function initArenaLayout() {
   const cx = CONFIG.world.width / 2;
   const cy = CONFIG.world.height / 2;
 
-  // 4 Tactical Cover Pillars around the arena
   state.obstacles = [
     { x: cx - 340, y: cy - 340, w: 110, h: 110 },
     { x: cx + 230, y: cy - 340, w: 110, h: 110 },
@@ -476,7 +604,6 @@ function initArenaLayout() {
     { x: cx + 230, y: cy + 230, w: 110, h: 110 }
   ];
 
-  // 4 Interactive Buy Stations / Traps
   state.stations = [
     {
       id: 'trap_center',
@@ -490,7 +617,8 @@ function initArenaLayout() {
       activeTimer: 0,
       angle: 0,
       onBuy: (st) => {
-        st.activeTimer = 18.0; // Shreds enemies for 18 seconds
+        st.activeTimer = 18.0;
+        SFX.buy();
         spawnFloatingText(st.x, st.y - 30, 'BLADE TRAP ACTIVE!', '#ffbe0b');
       }
     },
@@ -508,6 +636,7 @@ function initArenaLayout() {
         p.weaponTier = st.level;
         p.damage = Math.round(p.damage * 1.35);
         st.cost = Math.round(st.cost * 1.65);
+        SFX.buy();
         spawnFloatingText(p.x, p.y - 30, `BOW TIER ${st.level}!`, '#ff006e');
       }
     },
@@ -523,6 +652,7 @@ function initArenaLayout() {
         p.maxHp += 40;
         p.hp = Math.min(p.maxHp, p.hp + 60);
         st.cost = Math.round(st.cost * 1.45);
+        SFX.buy();
         spawnFloatingText(p.x, p.y - 30, '+40 MAX HP & HEAL!', '#06d6a0');
       }
     },
@@ -538,6 +668,7 @@ function initArenaLayout() {
         p.fireRate = +(p.fireRate * 1.2).toFixed(2);
         p.speed = Math.round(p.speed * 1.08);
         st.cost = Math.round(st.cost * 1.5);
+        SFX.buy();
         spawnFloatingText(p.x, p.y - 30, 'SPEED & FIRE RATE UP!', '#3a86ff');
       }
     }
@@ -546,6 +677,7 @@ function initArenaLayout() {
 
 function startWave(waveNum) {
   state.wave = waveNum;
+  saveHighScores();
   const baseCount = Math.floor(4 + waveNum * 2.2);
   const isBossWave = waveNum % 5 === 0;
   state.waveTotalEnemies = isBossWave ? baseCount + 1 : baseCount;
@@ -569,7 +701,7 @@ function resetGame() {
   interactBtn.style.display = 'none';
 
   state.kills = 0;
-  state.points = 250; // Starting points
+  state.points = 250;
   state.survivalTime = 0;
   state.screenShake = 0;
   state.damageFlash = 0;
@@ -591,12 +723,20 @@ function resetGame() {
     diagonalSets: 0,
     pierce: 0,
     wallBounces: 0,
+    fireLevel: 0,
+    iceLevel: 0,
+    lightningLevel: 0,
+    critChance: 0.05,
     lifesteal: 0,
     moveAngle: 0,
     aimAngle: 0,
     fireCooldown: 0,
     bowRecoil: 0,
     iFrameTimer: 0,
+    dashCooldown: 0,
+    dashTimer: 0,
+    dashDirX: 0,
+    dashDirY: 0,
     target: null
   };
 
@@ -611,11 +751,13 @@ function resetGame() {
   state.pickups = [];
   state.floatingTexts = [];
   state.particles = [];
+  state.ghosts = [];
+  state.lightningBolts = [];
 
   startWave(1);
 }
 
-// --- 4. HIGH-DPI RESIZE HANDLER ---
+// --- 5. HIGH-DPI RESIZE HANDLER ---
 function resizeCanvas() {
   state.screenW = window.innerWidth;
   state.screenH = window.innerHeight;
@@ -628,7 +770,32 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// --- 5. UI CONTROLS, INTERACT BUTTON & DEV CONSOLE ---
+// --- 6. DASH, BUY & DEV CONSOLE CONTROLS ---
+function triggerDash() {
+  SFX.unlock();
+  const p = state.player;
+  if (!p || state.gameOver || state.victory || state.choosingSkill || state.devOpen) return;
+  if (p.dashCooldown > 0 || p.dashTimer > 0) return;
+
+  p.dashTimer = CONFIG.playerBase.dashDuration;
+  p.dashCooldown = CONFIG.playerBase.dashCooldown;
+  p.iFrameTimer = CONFIG.playerBase.dashDuration + 0.1;
+
+  // Dash in movement direction, or aim direction if standing still
+  const mag = Math.hypot(input.joy.dx, input.joy.dy);
+  const angle = mag > CONFIG.joystick.deadzone ? p.moveAngle : p.aimAngle;
+  p.dashDirX = Math.cos(angle);
+  p.dashDirY = Math.sin(angle);
+
+  SFX.dash();
+  spawnHitParticles(p.x, p.y, '#3a86ff', 10);
+}
+
+dashBtn.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  triggerDash();
+});
+
 document.getElementById('zoomOutBtn').addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   CONFIG.camera.zoom = Math.max(CONFIG.camera.minZoom, +(CONFIG.camera.zoom - 0.08).toFixed(2));
@@ -638,9 +805,9 @@ document.getElementById('zoomInBtn').addEventListener('pointerdown', (e) => {
   CONFIG.camera.zoom = Math.min(CONFIG.camera.maxZoom, +(CONFIG.camera.zoom + 0.08).toFixed(2));
 });
 
-// Buy / Activate Station Button
 interactBtn.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
+  SFX.unlock();
   const st = state.activeStation;
   if (!st) return;
   if (st.id === 'trap_center' && st.activeTimer > 0) return;
@@ -686,7 +853,7 @@ document.getElementById('cheatBoss').addEventListener('pointerdown', () => {
 });
 document.getElementById('cheatAllSkills').addEventListener('pointerdown', () => {
   SKILLS.forEach(s => s.apply(state.player));
-  devLog.textContent = 'All skills stacked (+1)!';
+  devLog.textContent = 'All Elemental & Bow skills stacked (+1)!';
 });
 document.getElementById('cheatNuke').addEventListener('pointerdown', () => {
   state.kills += state.enemies.length;
@@ -726,7 +893,7 @@ document.getElementById('devRunBtn').addEventListener('pointerdown', () => {
   devInput.value = '';
 });
 
-// --- 6. INPUT SYSTEM ---
+// --- 7. MULTI-TOUCH INPUT SYSTEM ---
 const input = {
   joy: {
     active: false,
@@ -746,11 +913,13 @@ function isUIElement(target) {
     target.closest('#topRightControls') ||
     target.closest('#upgradeModal') ||
     target.closest('#devModal') ||
-    target.closest('#interactBtn')
+    target.closest('#interactBtn') ||
+    target.closest('#dashBtn')
   );
 }
 
 function startJoystick(id, x, y) {
+  SFX.unlock();
   if (state.choosingSkill || state.devOpen) return;
   if (state.gameOver || state.victory) {
     resetGame();
@@ -806,7 +975,6 @@ window.addEventListener('touchstart', (e) => {
 }, { passive: false });
 
 window.addEventListener('touchmove', (e) => {
-  if (isUIElement(e.target)) return;
   e.preventDefault();
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i];
@@ -841,16 +1009,23 @@ window.addEventListener('mouseup', () => {
 
 window.addEventListener('keydown', (e) => {
   if (state.devOpen) return;
-  if ((state.gameOver || state.victory) && (e.key === ' ' || e.key === 'Enter')) resetGame();
+  if ((state.gameOver || state.victory) && (e.key === ' ' || e.key === 'Enter')) {
+    resetGame();
+    return;
+  }
+  if (e.key === ' ' || e.key === 'Shift') {
+    triggerDash();
+  }
   input.keys[e.key.toLowerCase()] = true;
 });
 window.addEventListener('keyup', (e) => { input.keys[e.key.toLowerCase()] = false; });
 
-// --- 7. SKILL UPGRADE MODAL ---
+// --- 8. SKILL UPGRADE MODAL ---
 function openSkillUpgradeModal() {
   state.choosingSkill = true;
   endJoystick();
   interactBtn.style.display = 'none';
+  SFX.waveClear();
 
   modalWaveTitle.textContent = `WAVE ${state.wave} CLEARED!`;
   cardContainer.innerHTML = '';
@@ -866,6 +1041,7 @@ function openSkillUpgradeModal() {
     `;
     card.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
+      SFX.buy();
       skill.apply(state.player);
       spawnFloatingText(state.player.x, state.player.y - 30, skill.name, '#06d6a0');
       state.choosingSkill = false;
@@ -878,7 +1054,7 @@ function openSkillUpgradeModal() {
   upgradeModal.classList.add('active');
 }
 
-// --- 8. PHYSICS, OBSTACLE COLLISION & LINE OF SIGHT ---
+// --- 9. PHYSICS, OBSTACLE COLLISION & LINE OF SIGHT ---
 function resolveCircleRect(entity, rect) {
   const closestX = Math.max(rect.x, Math.min(entity.x, rect.x + rect.w));
   const closestY = Math.max(rect.y, Math.min(entity.y, rect.y + rect.h));
@@ -895,7 +1071,6 @@ function resolveCircleRect(entity, rect) {
 }
 
 function lineIntersectsRect(x1, y1, x2, y2, r) {
-  // Check 5 sample points along segment for fast line-of-sight check against pillars
   for (let i = 1; i <= 5; i++) {
     const t = i / 6;
     const px = x1 + (x2 - x1) * t;
@@ -1012,6 +1187,10 @@ function spawnEnemyDirect(forcedType = null) {
     color: cfg.color,
     border: cfg.border,
     hitFlash: 0,
+    burnTimer: 0,
+    burnTick: 0,
+     burnDmg: 0,
+    chillTimer: 0,
     trapHitCooldown: 0,
     fireTimer: cfg.fireCooldown ? (0.7 + Math.random() * 0.7) : 0,
     chargeTimer: 0,
@@ -1020,6 +1199,7 @@ function spawnEnemyDirect(forcedType = null) {
 }
 
 function firePlayerVolley(p) {
+  SFX.shoot();
   const baseAngle = p.aimAngle;
   const muzzleDist = CONFIG.playerBase.radius + 6;
 
@@ -1052,14 +1232,16 @@ function firePlayerVolley(p) {
 }
 
 function createPlayerArrow(x, y, angle, p) {
+  const isCrit = Math.random() < p.critChance;
   state.projectiles.push({
     x,
     y,
     vx: Math.cos(angle) * CONFIG.playerBase.arrowSpeed,
     vy: Math.sin(angle) * CONFIG.playerBase.arrowSpeed,
     angle,
-    radius: 5,
-    damage: p.damage,
+    radius: isCrit ? 6.5 : 5,
+    damage: isCrit ? Math.round(p.damage * 2.2) : p.damage,
+    isCrit,
     pierceLeft: p.pierce,
     bouncesLeft: p.wallBounces,
     hitIds: new Set(),
@@ -1075,6 +1257,7 @@ function damagePlayer(amount, sourceX, sourceY) {
   p.iFrameTimer = CONFIG.playerBase.iFrameDuration;
   state.screenShake = 14;
   state.damageFlash = 0.35;
+  SFX.hurt();
 
   const angle = Math.atan2(p.y - sourceY, p.x - sourceX);
   p.x += Math.cos(angle) * 14;
@@ -1085,6 +1268,7 @@ function damagePlayer(amount, sourceX, sourceY) {
 
   if (p.hp <= 0) {
     state.gameOver = true;
+    saveHighScores();
     endJoystick();
     interactBtn.style.display = 'none';
   }
@@ -1095,6 +1279,8 @@ function eliminateEnemy(index) {
   const p = state.player;
   state.kills++;
   state.points += e.points;
+  saveHighScores();
+  SFX.kill();
 
   spawnHitParticles(e.x, e.y, e.color, 12);
   spawnFloatingText(e.x, e.y, `+${e.points} PTS`, '#ffd166');
@@ -1124,7 +1310,7 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
 }
 
-// --- 9. UPDATE LOOP ---
+// --- 10. UPDATE LOOP ---
 let nextEnemyUid = 1;
 
 function update(dt) {
@@ -1136,6 +1322,16 @@ function update(dt) {
   if (state.screenShake > 0) state.screenShake = Math.max(0, state.screenShake - dt * 30);
   if (state.damageFlash > 0) state.damageFlash = Math.max(0, state.damageFlash - dt);
   if (p.iFrameTimer > 0) p.iFrameTimer = Math.max(0, p.iFrameTimer - dt);
+
+  // Dash Cooldown & UI Button Update
+  if (p.dashCooldown > 0) {
+    p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+    dashBtn.classList.add('cooldown');
+    dashSub.textContent = `${p.dashCooldown.toFixed(1)}s`;
+  } else {
+    dashBtn.classList.remove('cooldown');
+    dashSub.textContent = 'READY';
+  }
 
   // 1. Wave Enemy Spawner
   const maxSimulEnemies = Math.min(26, 10 + state.wave * 2);
@@ -1149,6 +1345,7 @@ function update(dt) {
   } else if (state.enemies.length === 0) {
     if (state.wave >= CONFIG.maxWaves) {
       state.victory = true;
+      saveHighScores();
       endJoystick();
       interactBtn.style.display = 'none';
       return;
@@ -1158,7 +1355,7 @@ function update(dt) {
     }
   }
 
-  // 2. Player Movement & Pillar Collision
+  // 2. Player Movement & Dash Execution
   let moveX = input.joy.dx;
   let moveY = input.joy.dy;
 
@@ -1168,7 +1365,22 @@ function update(dt) {
   if (input.keys['d'] || input.keys['arrowright']) moveX += 1;
 
   const mag = Math.hypot(moveX, moveY);
-  if (mag > CONFIG.joystick.deadzone) {
+
+  if (p.dashTimer > 0) {
+    p.dashTimer -= dt;
+    const dashSpeed = p.speed * CONFIG.playerBase.dashSpeedMult;
+    p.x += p.dashDirX * dashSpeed * dt;
+    p.y += p.dashDirY * dashSpeed * dt;
+
+    // Spawn holographic afterimage ghost
+    state.ghosts.push({
+      x: p.x,
+      y: p.y,
+      radius: CONFIG.playerBase.radius,
+      life: 0.22,
+      maxLife: 0.22
+    });
+  } else if (mag > CONFIG.joystick.deadzone) {
     const normX = moveX / (mag > 1 ? mag : 1);
     const normY = moveY / (mag > 1 ? mag : 1);
     p.vx = normX * p.speed;
@@ -1190,7 +1402,7 @@ function update(dt) {
   p.x = Math.max(pad, Math.min(CONFIG.world.width - pad, p.x));
   p.y = Math.max(pad, Math.min(CONFIG.world.height - pad, p.y));
 
-  // 3. Check Proximity to Interactive Stations & Update Traps
+  // 3. Check Interactive Stations
   let nearbyStation = null;
   for (const st of state.stations) {
     if (st.activeTimer > 0) {
@@ -1228,7 +1440,7 @@ function update(dt) {
   state.camera.x += (targetCamX - state.camera.x) * camLerp;
   state.camera.y += (targetCamY - state.camera.y) * camLerp;
 
-  // 5. Smart Auto-Targeting (Prioritizes Clear Line-of-Sight On-Screen Enemies)
+  // 5. Smart Auto-Targeting
   let bestVisibleEnemy = null;
   let minVisDist = CONFIG.playerBase.attackRange;
   let fallbackEnemy = null;
@@ -1268,15 +1480,32 @@ function update(dt) {
     p.aimAngle = p.moveAngle;
   }
 
-  // 7. Update Enemies (AI, Trap Damage & Pillar Collision)
+  // 7. Update Enemies (AI, Elemental Burn/Chill, Trap Damage & Pillar Collision)
   const centerTrap = state.stations[0];
 
   for (let i = state.enemies.length - 1; i >= 0; i--) {
     const e = state.enemies[i];
     if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
     if (e.trapHitCooldown > 0) e.trapHitCooldown = Math.max(0, e.trapHitCooldown - dt);
+    if (e.chillTimer > 0) e.chillTimer = Math.max(0, e.chillTimer - dt);
 
-    // Check Spinning Blade Trap Damage
+    // Fire Burn Damage Over Time
+    if (e.burnTimer > 0) {
+      e.burnTimer -= dt;
+      e.burnTick -= dt;
+      if (e.burnTick <= 0) {
+        e.burnTick = 0.5;
+        e.hp -= e.burnDmg;
+        spawnFloatingText(e.x, e.y - e.radius, `🔥-${e.burnDmg}`, '#ff7b00');
+        spawnHitParticles(e.x, e.y, '#ff7b00', 3);
+        if (e.hp <= 0) {
+          eliminateEnemy(i);
+          continue;
+        }
+      }
+    }
+
+    // Spinning Blade Trap Damage
     if (centerTrap.activeTimer > 0 && e.trapHitCooldown <= 0) {
       const distToTrap = Math.hypot(e.x - centerTrap.x, e.y - centerTrap.y);
       if (distToTrap < centerTrap.BladeRadius + e.radius) {
@@ -1302,6 +1531,10 @@ function update(dt) {
     const dirX = dx / distToPlayer;
     const dirY = dy / distToPlayer;
 
+    // Chill slow multiplier
+    const moveMult = e.chillTimer > 0 ? 0.58 : 1.0;
+    const effSpeed = e.speed * moveMult;
+
     if (e.type === 'shooter') {
       const cfg = CONFIG.enemies.shooter;
       if (e.chargeTimer > 0) {
@@ -1323,11 +1556,11 @@ function update(dt) {
       } else {
         e.aimAngle = Math.atan2(dy, dx);
         if (distToPlayer > cfg.preferredDist + 50) {
-          e.vx = dirX * e.speed;
-          e.vy = dirY * e.speed;
+          e.vx = dirX * effSpeed;
+          e.vy = dirY * effSpeed;
         } else if (distToPlayer < cfg.preferredDist - 80) {
-          e.vx = -dirX * (e.speed * 0.6);
-          e.vy = -dirY * (e.speed * 0.6);
+          e.vx = -dirX * (effSpeed * 0.6);
+          e.vy = -dirY * (effSpeed * 0.6);
         } else {
           e.vx = 0;
           e.vy = 0;
@@ -1341,8 +1574,8 @@ function update(dt) {
       }
     } else if (e.type === 'boss') {
       const cfg = CONFIG.enemies.boss;
-      e.vx = dirX * e.speed;
-      e.vy = dirY * e.speed;
+      e.vx = dirX * effSpeed;
+      e.vy = dirY * effSpeed;
       e.fireTimer -= dt;
       if (e.fireTimer <= 0 && isEntityOnScreen(e)) {
         const baseA = Math.atan2(dy, dx);
@@ -1361,8 +1594,8 @@ function update(dt) {
         e.fireTimer = cfg.fireCooldown;
       }
     } else {
-      e.vx = dirX * e.speed;
-      e.vy = dirY * e.speed;
+      e.vx = dirX * effSpeed;
+      e.vy = dirY * effSpeed;
     }
 
     e.x += (e.vx + e.knockX) * dt;
@@ -1372,7 +1605,6 @@ function update(dt) {
       resolveCircleRect(e, obs);
     }
 
-    // Swarm separation
     for (let j = i - 1; j >= 0; j--) {
       const other = state.enemies[j];
       const sdx = e.x - other.x;
@@ -1399,7 +1631,7 @@ function update(dt) {
     }
   }
 
-  // 8. Update Player Arrows (Enemy Hits, Pillar Ricochet & Wall Bounces)
+  // 8. Update Player Arrows (Crits, Elementals, Pierce & Ricochet)
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const proj = state.projectiles[i];
     const prevX = proj.x;
@@ -1419,17 +1651,64 @@ function update(dt) {
         proj.hitIds.add(e.uid);
         e.hp -= proj.damage;
         e.hitFlash = 0.1;
-        state.points += 10; // +10 points per arrow hit
+        state.points += 10;
+
+        if (proj.isCrit) {
+          SFX.crit();
+          spawnFloatingText(e.x, e.y - e.radius - 8, `CRIT -${proj.damage}!`, '#ff006e');
+        } else {
+          SFX.hit();
+          spawnFloatingText(e.x, e.y - e.radius, `-${proj.damage}`);
+        }
+
+        // Apply Elemental Effects
+        if (p.fireLevel > 0) {
+          e.burnTimer = 3.0;
+          e.burnTick = 0.45;
+          e.burnDmg = Math.max(6, Math.round(p.damage * 0.28 * p.fireLevel));
+        }
+        if (p.iceLevel > 0) {
+          e.chillTimer = 2.5;
+        }
+        if (p.lightningLevel > 0) {
+          // Find nearest secondary enemy within 240px to arc Chain Lightning
+          let arcTarget = null;
+          let minArcDist = 240;
+          for (let k = 0; k < state.enemies.length; k++) {
+            if (k === j) continue;
+            const cand = state.enemies[k];
+            const dArc = Math.hypot(cand.x - e.x, cand.y - e.y);
+            if (dArc < minArcDist) {
+              minArcDist = dArc;
+              arcTarget = cand;
+            }
+          }
+          if (arcTarget) {
+            const arcDmg = Math.round(p.damage * 0.65 * p.lightningLevel);
+            arcTarget.hp -= arcDmg;
+            arcTarget.hitFlash = 0.1;
+            state.lightningBolts.push({
+              x1: e.x,
+              y1: e.y,
+              x2: arcTarget.x,
+              y2: arcTarget.y,
+              life: 0.14
+            });
+            spawnFloatingText(arcTarget.x, arcTarget.y - arcTarget.radius, `⚡-${arcDmg}`, '#00f5d4');
+          }
+        }
 
         const kbForce = e.type === 'boss' ? 4 : (e.type === 'brute' ? 8 : 18);
         e.knockX = Math.cos(proj.angle) * kbForce;
         e.knockY = Math.sin(proj.angle) * kbForce;
 
-        spawnFloatingText(e.x, e.y - e.radius, `-${proj.damage}`);
         spawnHitParticles(proj.x, proj.y, e.color, 4);
 
-        if (e.hp <= 0) {
-          eliminateEnemy(j);
+        // Clean up any dead enemies (including secondary lightning kills)
+        for (let k = state.enemies.length - 1; k >= 0; k--) {
+          if (state.enemies[k].hp <= 0) {
+            eliminateEnemy(k);
+          }
         }
 
         if (proj.pierceLeft > 0) {
@@ -1446,7 +1725,7 @@ function update(dt) {
       continue;
     }
 
-    // Check Pillar Collisions (Bounce if player has Bouncy Walls)
+    // Pillar Ricochets
     let hitPillar = false;
     for (const obs of state.obstacles) {
       if (proj.x >= obs.x && proj.x <= obs.x + obs.w && proj.y >= obs.y && proj.y <= obs.y + obs.h) {
@@ -1469,7 +1748,7 @@ function update(dt) {
       continue;
     }
 
-    // Outer Boundary Wall Bounces
+    // Outer Wall Bounces
     let bounced = false;
     if (proj.x <= 4 || proj.x >= CONFIG.world.width - 4) {
       if (proj.bouncesLeft > 0) {
@@ -1498,7 +1777,7 @@ function update(dt) {
     }
   }
 
-  // 9. Update Enemy Projectiles (Blocked by Stone Pillars!)
+  // 9. Update Enemy Projectiles
   for (let i = state.enemyProjectiles.length - 1; i >= 0; i--) {
     const ep = state.enemyProjectiles[i];
     const prevX = ep.x;
@@ -1507,7 +1786,6 @@ function update(dt) {
     ep.y += ep.vy * dt;
     ep.life -= dt;
 
-    // Check if blocked by a stone pillar
     const blockedByPillar = state.obstacles.some(
       obs => ep.x + ep.radius > obs.x && ep.x - ep.radius < obs.x + obs.w &&
              ep.y + ep.radius > obs.y && ep.y - ep.radius < obs.y + obs.h
@@ -1545,6 +1823,7 @@ function update(dt) {
     }
     if (dist < CONFIG.playerBase.radius + pk.radius) {
       p.hp = Math.min(p.maxHp, p.hp + pk.heal);
+      SFX.buy();
       spawnFloatingText(p.x, p.y - CONFIG.playerBase.radius, `+${pk.heal} HP`, '#06d6a0');
       state.pickups.splice(i, 1);
       continue;
@@ -1552,13 +1831,23 @@ function update(dt) {
     if (pk.life <= 0) state.pickups.splice(i, 1);
   }
 
-  // 11. Particles & Floating Text
+  // 11. Particles, Ghosts, Lightning Bolts & Floating Text
   for (let i = state.particles.length - 1; i >= 0; i--) {
     const pt = state.particles[i];
     pt.x += pt.vx * dt;
     pt.y += pt.vy * dt;
     pt.life -= dt;
     if (pt.life <= 0) state.particles.splice(i, 1);
+  }
+
+  for (let i = state.ghosts.length - 1; i >= 0; i--) {
+    state.ghosts[i].life -= dt;
+    if (state.ghosts[i].life <= 0) state.ghosts.splice(i, 1);
+  }
+
+  for (let i = state.lightningBolts.length - 1; i >= 0; i--) {
+    state.lightningBolts[i].life -= dt;
+    if (state.lightningBolts[i].life <= 0) state.lightningBolts.splice(i, 1);
   }
 
   for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
@@ -1570,7 +1859,7 @@ function update(dt) {
   }
 }
 
-// --- 10. RENDER PIPELINE ---
+// --- 11. RENDER PIPELINE ---
 function draw() {
   ctx.clearRect(0, 0, state.screenW, state.screenH);
 
@@ -1606,9 +1895,8 @@ function draw() {
 
   const p = state.player;
 
-  // 2. Interactive Map Stations & Spinning Blade Trap
+  // 2. Interactive Map Stations & Blade Trap
   for (const st of state.stations) {
-    // Active Spinning Blades
     if (st.id === 'trap_center' && st.activeTimer > 0) {
       ctx.save();
       ctx.translate(st.x, st.y);
@@ -1620,7 +1908,6 @@ function draw() {
       ctx.arc(0, 0, st.BladeRadius, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Dual Saw Arms
       ctx.strokeStyle = '#ffbe0b';
       ctx.lineWidth = 8;
       ctx.beginPath();
@@ -1633,7 +1920,6 @@ function draw() {
       ctx.restore();
     }
 
-    // Station Pad
     ctx.fillStyle = 'rgba(13, 17, 23, 0.85)';
     ctx.beginPath();
     ctx.arc(st.x, st.y, st.radius, 0, Math.PI * 2);
@@ -1652,7 +1938,7 @@ function draw() {
     ctx.fillText(`${st.cost} PTS`, st.x, st.y + 4);
   }
 
-  // 3. Tactical Stone Pillars (Cover Obstacles)
+  // 3. Stone Pillars
   for (const obs of state.obstacles) {
     ctx.fillStyle = '#21262d';
     ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
@@ -1661,7 +1947,6 @@ function draw() {
     ctx.lineWidth = 4;
     ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
 
-    // Inner bevel detail
     ctx.strokeStyle = '#30363d';
     ctx.lineWidth = 2;
     ctx.strokeRect(obs.x + 12, obs.y + 12, obs.w - 24, obs.h - 24);
@@ -1678,7 +1963,7 @@ function draw() {
     ctx.stroke();
   }
 
-  // 5. Enemies
+  // 5. Enemies (With Frost & Burn Visual Status)
   for (const e of state.enemies) {
     if (p.target === e) {
       ctx.strokeStyle = '#ef476f';
@@ -1699,12 +1984,12 @@ function draw() {
       ctx.setLineDash([]);
     }
 
-    ctx.fillStyle = e.hitFlash > 0 ? '#ffffff' : e.color;
+    ctx.fillStyle = e.hitFlash > 0 ? '#ffffff' : (e.chillTimer > 0 ? '#48cae4' : e.color);
     ctx.beginPath();
     ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = e.border;
+    ctx.strokeStyle = e.burnTimer > 0 ? '#ff7b00' : e.border;
     ctx.lineWidth = e.type === 'boss' ? 5 : 3.5;
     ctx.stroke();
 
@@ -1718,7 +2003,20 @@ function draw() {
     ctx.fillRect(barX, barY, barW * (e.hp / e.maxHp), barH);
   }
 
-  // 6. Enemy Projectiles
+  // 6. Chain Lightning Arcs
+  for (const bolt of state.lightningBolts) {
+    ctx.strokeStyle = '#00f5d4';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(bolt.x1, bolt.y1);
+    const midX = (bolt.x1 + bolt.x2) / 2 + (Math.random() - 0.5) * 28;
+    const midY = (bolt.y1 + bolt.y2) / 2 + (Math.random() - 0.5) * 28;
+    ctx.lineTo(midX, midY);
+    ctx.lineTo(bolt.x2, bolt.y2);
+    ctx.stroke();
+  }
+
+  // 7. Enemy Projectiles
   for (const ep of state.enemyProjectiles) {
     ctx.fillStyle = 'rgba(255, 77, 109, 0.35)';
     ctx.beginPath();
@@ -1735,14 +2033,20 @@ function draw() {
     ctx.stroke();
   }
 
-  // 7. Player Arrows
+  // 8. Player Arrows
   for (const proj of state.projectiles) {
     ctx.save();
     ctx.translate(proj.x, proj.y);
     ctx.rotate(proj.angle);
 
-    ctx.strokeStyle = p.weaponTier > 1 ? '#ff006e' : (proj.pierceLeft > 0 ? '#06d6a0' : '#ffd166');
-    ctx.lineWidth = 3.5;
+    let shaftColor = '#ffd166';
+    if (proj.isCrit) shaftColor = '#ff006e';
+    else if (p.fireLevel > 0) shaftColor = '#ff7b00';
+    else if (p.iceLevel > 0) shaftColor = '#48cae4';
+    else if (proj.pierceLeft > 0) shaftColor = '#06d6a0';
+
+    ctx.strokeStyle = shaftColor;
+    ctx.lineWidth = proj.isCrit ? 4.5 : 3.5;
     ctx.beginPath();
     ctx.moveTo(-13, 0);
     ctx.lineTo(7, 0);
@@ -1759,7 +2063,15 @@ function draw() {
     ctx.restore();
   }
 
-  // 8. Player (No visible attack range ring!)
+  // 9. Dash Afterimage Ghosts
+  for (const g of state.ghosts) {
+    ctx.fillStyle = `rgba(58, 134, 255, ${(g.life / g.maxLife) * 0.45})`;
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 10. Player
   ctx.save();
   ctx.translate(p.x, p.y);
 
@@ -1811,7 +2123,7 @@ function draw() {
   ctx.fillStyle = '#06d6a0';
   ctx.fillRect(p.x - pBarW / 2, p.y - CONFIG.playerBase.radius - 18, pBarW * (p.hp / p.maxHp), pBarH);
 
-  // 9. Particles & Floating Text
+  // 11. Particles & Floating Text
   for (const pt of state.particles) {
     ctx.fillStyle = pt.color;
     ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
@@ -1835,7 +2147,7 @@ function draw() {
 
   ctx.restore(); // End World Space
 
-  // --- 11. SCREEN-SPACE HUD ---
+  // --- 12. SCREEN-SPACE HUD ---
   if (state.damageFlash > 0) {
     ctx.fillStyle = `rgba(239, 71, 111, ${state.damageFlash * 0.55})`;
     ctx.fillRect(0, 0, state.screenW, state.screenH);
@@ -1844,10 +2156,10 @@ function draw() {
   const remainingEnemies = state.waveEnemiesToSpawn + state.enemies.length;
 
   ctx.fillStyle = 'rgba(13, 17, 23, 0.9)';
-  ctx.fillRect(12, 12, 245, 104);
+  ctx.fillRect(12, 12, 250, 120);
   ctx.strokeStyle = '#30363d';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(12, 12, 245, 104);
+  ctx.strokeRect(12, 12, 250, 120);
 
   ctx.fillStyle = '#ffd166';
   ctx.font = 'bold 15px sans-serif';
@@ -1859,14 +2171,16 @@ function draw() {
   ctx.fillText(`HP: ${Math.ceil(p.hp)} / ${p.maxHp}${state.godMode ? ' (GOD)' : ''}`, 22, 53);
 
   ctx.fillStyle = '#21262d';
-  ctx.fillRect(22, 59, 220, 8);
+  ctx.fillRect(22, 59, 225, 8);
   ctx.fillStyle = p.hp > p.maxHp * 0.3 ? '#06d6a0' : '#ef476f';
-  ctx.fillRect(22, 59, 220 * (p.hp / p.maxHp), 8);
+  ctx.fillRect(22, 59, 225 * (p.hp / p.maxHp), 8);
 
   ctx.fillStyle = '#8b949e';
   ctx.font = 'bold 12px sans-serif';
   ctx.fillText(`Remaining: ${remainingEnemies}  •  Kills: ${state.kills}`, 22, 84);
-  ctx.fillText(`Bow Tier: ${p.weaponTier}  •  DMG: ${p.damage}`, 22, 103);
+  ctx.fillText(`Bow Tier: ${p.weaponTier}  •  DMG: ${p.damage}`, 22, 102);
+  ctx.fillStyle = '#58a6ff';
+  ctx.fillText(`Best Wave: ${state.bestWave}  •  Best Kills: ${state.bestKills}`, 22, 120);
 
   // Wave Announcement Banner
   if (state.waveBannerTimer > 0) {
@@ -1918,20 +2232,24 @@ function draw() {
     ctx.fillStyle = state.victory ? '#06d6a0' : '#ef476f';
     ctx.font = 'bold 34px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(state.victory ? 'WAVE 50 CONQUERED!' : 'YOU FELL', state.screenW / 2, state.screenH / 2 - 40);
+    ctx.fillText(state.victory ? 'WAVE 50 CONQUERED!' : 'YOU FELL', state.screenW / 2, state.screenH / 2 - 48);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = '18px sans-serif';
-    ctx.fillText(`Reached Wave: ${state.wave} / ${CONFIG.maxWaves}`, state.screenW / 2, state.screenH / 2 + 2);
-    ctx.fillText(`Enemies Defeated: ${state.kills}`, state.screenW / 2, state.screenH / 2 + 30);
+    ctx.fillText(`Reached Wave: ${state.wave} / ${CONFIG.maxWaves}`, state.screenW / 2, state.screenH / 2 - 6);
+    ctx.fillText(`Enemies Defeated: ${state.kills}`, state.screenW / 2, state.screenH / 2 + 22);
+
+    ctx.fillStyle = '#58a6ff';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText(`Personal Best — Wave ${state.bestWave} (${state.bestKills} Kills)`, state.screenW / 2, state.screenH / 2 + 54);
 
     ctx.fillStyle = '#ffd166';
     ctx.font = 'bold 16px sans-serif';
-    ctx.fillText('Tap anywhere to play again', state.screenW / 2, state.screenH / 2 + 82);
+    ctx.fillText('Tap anywhere to play again', state.screenW / 2, state.screenH / 2 + 96);
   }
 }
 
-// --- 12. MAIN LOOP ---
+// --- 13. MAIN LOOP ---
 resetGame();
 
 function gameLoop(now) {
