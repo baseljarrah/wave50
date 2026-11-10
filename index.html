@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Wave 50</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      touch-action: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0d1117;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #gameCanvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+/**
+ * ==========================================
+ * WAVE 50 - MILESTONE 1: CORE ENGINE & RUN-AND-GUN
+ * ==========================================
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- 1. GAME CONFIGURATION ---
+const CONFIG = {
+  world: {
+    width: 1400,
+    height: 1400,
+    gridSize: 70
+  },
+  player: {
+    radius: 20,
+    speed: 280,          // Pixels per second
+    fireRate: 3.5,       // Shots per second
+    attackRange: 520,    // Auto-target lock range
+    arrowSpeed: 750,     // Pixels per second
+    baseDamage: 25
+  },
+  joystick: {
+    maxRadius: 55,
+    knobRadius: 24,
+    deadzone: 0.08
+  }
+};
+
+// --- 2. CORE STATE ---
+const state = {
+  screenW: window.innerWidth,
+  screenH: window.innerHeight,
+  dpr: Math.min(window.devicePixelRatio || 1, 2),
+  lastTime: performance.now(),
+  camera: { x: 0, y: 0 },
+  player: {
+    x: CONFIG.world.width / 2,
+    y: CONFIG.world.height / 2,
+    vx: 0,
+    vy: 0,
+    moveAngle: 0,
+    aimAngle: 0,
+    fireCooldown: 0,
+    bowRecoil: 0,
+    target: null
+  },
+  projectiles: [],
+  dummies: [],
+  floatingTexts: [],
+  particles: []
+};
+
+// Spawn 3 target dummies at different positions to test dynamic target switching while moving
+function initDummies() {
+  const cx = CONFIG.world.width / 2;
+  const cy = CONFIG.world.height / 2;
+  const positions = [
+    { x: cx, y: cy - 220, label: 'Target A' },
+    { x: cx - 240, y: cy + 140, label: 'Target B' },
+    { x: cx + 240, y: cy + 140, label: 'Target C' }
+  ];
+
+  state.dummies = positions.map(p => ({
+    x: p.x,
+    y: p.y,
+    radius: 24,
+    hp: 200,
+    maxHp: 200,
+    hitFlash: 0,
+    respawnTimer: 0,
+    label: p.label
+  }));
+}
+initDummies();
+
+// --- 3. HIGH-DPI RESIZE HANDLER ---
+function resizeCanvas() {
+  state.screenW = window.innerWidth;
+  state.screenH = window.innerHeight;
+  state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  canvas.width = state.screenW * state.dpr;
+  canvas.height = state.screenH * state.dpr;
+  ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// --- 4. INPUT SYSTEM (Touch Joystick + Mouse Drag + WASD) ---
+const input = {
+  joy: {
+    active: false,
+    id: null,
+    startX: 0,
+    startY: 0,
+    currX: 0,
+    currY: 0,
+    dx: 0,
+    dy: 0
+  },
+  keys: {}
+};
+
+function startJoystick(id, x, y) {
+  input.joy.active = true;
+  input.joy.id = id;
+  input.joy.startX = x;
+  input.joy.startY = y;
+  input.joy.currX = x;
+  input.joy.currY = y;
+  input.joy.dx = 0;
+  input.joy.dy = 0;
+}
+
+function moveJoystick(x, y) {
+  const dx = x - input.joy.startX;
+  const dy = y - input.joy.startY;
+  const dist = Math.hypot(dx, dy);
+  const maxR = CONFIG.joystick.maxRadius;
+
+  if (dist > maxR) {
+    const angle = Math.atan2(dy, dx);
+    input.joy.currX = input.joy.startX + Math.cos(angle) * maxR;
+    input.joy.currY = input.joy.startY + Math.sin(angle) * maxR;
+    input.joy.dx = Math.cos(angle);
+    input.joy.dy = Math.sin(angle);
+  } else {
+    input.joy.currX = x;
+    input.joy.currY = y;
+    input.joy.dx = dx / maxR;
+    input.joy.dy = dy / maxR;
+  }
+}
+
+function endJoystick() {
+  input.joy.active = false;
+  input.joy.id = null;
+  input.joy.dx = 0;
+  input.joy.dy = 0;
+}
+
+// Mobile Touch Events
+window.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const t = e.changedTouches[i];
+    if (!input.joy.active) {
+      startJoystick(t.identifier, t.clientX, t.clientY);
+      break;
+    }
+  }
+}, { passive: false });
+
+window.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const t = e.changedTouches[i];
+    if (input.joy.active && t.identifier === input.joy.id) {
+      moveJoystick(t.clientX, t.clientY);
+      break;
+    }
+  }
+}, { passive: false });
+
+function handleTouchEnd(e) {
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === input.joy.id) {
+      endJoystick();
+      break;
+    }
+  }
+}
+window.addEventListener('touchend', handleTouchEnd, { passive: false });
+window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+// Desktop Mouse Drag Support (for easy testing in a PC browser)
+window.addEventListener('mousedown', (e) => {
+  if (!input.joy.active) startJoystick('mouse', e.clientX, e.clientY);
+});
+window.addEventListener('mousemove', (e) => {
+  if (input.joy.active && input.joy.id === 'mouse') moveJoystick(e.clientX, e.clientY);
+});
+window.addEventListener('mouseup', () => {
+  if (input.joy.id === 'mouse') endJoystick();
+});
+
+// Desktop Keyboard Support (WASD / Arrow Keys)
+window.addEventListener('keydown', (e) => { input.keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', (e) => { input.keys[e.key.toLowerCase()] = false; });
+
+// --- 5. HELPER FUNCTIONS ---
+function spawnFloatingText(x, y, text, color = '#ffd166') {
+  state.floatingTexts.push({
+    x: x + (Math.random() - 0.5) * 16,
+    y: y - 20,
+    text,
+    color,
+    alpha: 1,
+    vy: -45,
+    life: 0.65
+  });
+}
+
+function spawnHitParticles(x, y, color) {
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 60 + Math.random() * 110;
+    state.particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      radius: 2 + Math.random() * 2.5,
+      color,
+      life: 0.25 + Math.random() * 0.15,
+      maxLife: 0.4
+    });
+  }
+}
+
+// --- 6. UPDATE LOOP (Delta-Time Normalized) ---
+function update(dt) {
+  const p = state.player;
+
+  // 1. Read Movement Input
+  let moveX = input.joy.dx;
+  let moveY = input.joy.dy;
+
+  if (input.keys['w'] || input.keys['arrowup']) moveY -= 1;
+  if (input.keys['s'] || input.keys['arrowdown']) moveY += 1;
+  if (input.keys['a'] || input.keys['arrowleft']) moveX -= 1;
+  if (input.keys['d'] || input.keys['arrowright']) moveX += 1;
+
+  const mag = Math.hypot(moveX, moveY);
+  if (mag > CONFIG.joystick.deadzone) {
+    const normX = moveX / (mag > 1 ? mag : 1);
+    const normY = moveY / (mag > 1 ? mag : 1);
+    p.vx = normX * CONFIG.player.speed;
+    p.vy = normY * CONFIG.player.speed;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.moveAngle = Math.atan2(normY, normX);
+  } else {
+    p.vx = 0;
+    p.vy = 0;
+  }
+
+  // Clamp player inside world boundaries
+  const pad = CONFIG.player.radius + 8;
+  p.x = Math.max(pad, Math.min(CONFIG.world.width - pad, p.x));
+  p.y = Math.max(pad, Math.min(CONFIG.world.height - pad, p.y));
+
+  // 2. Find Closest Active Target in Range
+  let closestTarget = null;
+  let minDist = CONFIG.player.attackRange;
+
+  for (const d of state.dummies) {
+    if (d.respawnTimer > 0) continue;
+    const dist = Math.hypot(d.x - p.x, d.y - p.y);
+    if (dist <= minDist) {
+      minDist = dist;
+      closestTarget = d;
+    }
+  }
+  p.target = closestTarget;
+
+  // 3. Aim & Continuous Run-and-Gun Firing
+  if (p.fireCooldown > 0) p.fireCooldown -= dt;
+  if (p.bowRecoil > 0) p.bowRecoil = Math.max(0, p.bowRecoil - dt * 6);
+
+  if (p.target) {
+    p.aimAngle = Math.atan2(p.target.y - p.y, p.target.x - p.x);
+
+    if (p.fireCooldown <= 0) {
+      p.fireCooldown = 1 / CONFIG.player.fireRate;
+      p.bowRecoil = 1;
+
+      const muzzleDist = CONFIG.player.radius + 6;
+      state.projectiles.push({
+        x: p.x + Math.cos(p.aimAngle) * muzzleDist,
+        y: p.y + Math.sin(p.aimAngle) * muzzleDist,
+        vx: Math.cos(p.aimAngle) * CONFIG.player.arrowSpeed,
+        vy: Math.sin(p.aimAngle) * CONFIG.player.arrowSpeed,
+        angle: p.aimAngle,
+        radius: 5,
+        damage: CONFIG.player.baseDamage,
+        life: 1.2
+      });
+    }
+  } else if (mag > CONFIG.joystick.deadzone) {
+    // Look where we are running if no enemy is in range
+    p.aimAngle = p.moveAngle;
+  }
+
+  // 4. Update Projectiles
+  for (let i = state.projectiles.length - 1; i >= 0; i--) {
+    const proj = state.projectiles[i];
+    proj.x += proj.vx * dt;
+    proj.y += proj.vy * dt;
+    proj.life -= dt;
+
+    let hit = false;
+    for (const d of state.dummies) {
+      if (d.respawnTimer > 0) continue;
+      const dist = Math.hypot(proj.x - d.x, proj.y - d.y);
+      if (dist < d.radius + proj.radius) {
+        d.hp -= proj.damage;
+        d.hitFlash = 0.12;
+        spawnFloatingText(d.x, d.y - d.radius, `-${proj.damage}`);
+        spawnHitParticles(proj.x, proj.y, '#ef476f');
+
+        if (d.hp <= 0) {
+          d.hp = 0;
+          d.respawnTimer = 2.0; // Respawn dummy in 2 seconds
+          spawnFloatingText(d.x, d.y - d.radius - 15, 'KO!', '#06d6a0');
+        }
+        hit = true;
+        break;
+      }
+    }
+
+    // Remove arrow on hit, timeout, or hitting arena walls
+    if (
+      hit ||
+      proj.life <= 0 ||
+      proj.x <= 0 || proj.x >= CONFIG.world.width ||
+      proj.y <= 0 || proj.y >= CONFIG.world.height
+    ) {
+      state.projectiles.splice(i, 1);
+    }
+  }
+
+  // 5. Update Dummies (Flash & Respawn)
+  for (const d of state.dummies) {
+    if (d.hitFlash > 0) d.hitFlash = Math.max(0, d.hitFlash - dt);
+    if (d.respawnTimer > 0) {
+      d.respawnTimer -= dt;
+      if (d.respawnTimer <= 0) {
+        d.hp = d.maxHp;
+      }
+    }
+  }
+
+  // 6. Update Particles & Floating Damage Numbers
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const pt = state.particles[i];
+    pt.x += pt.vx * dt;
+    pt.y += pt.vy * dt;
+    pt.life -= dt;
+    if (pt.life <= 0) state.particles.splice(i, 1);
+  }
+
+  for (let i = state.floatingTexts.length - 1; i >= 0; i--) {
+    const ft = state.floatingTexts[i];
+    ft.y += ft.vy * dt;
+    ft.life -= dt;
+    ft.alpha = Math.max(0, ft.life / 0.65);
+    if (ft.life <= 0) state.floatingTexts.splice(i, 1);
+  }
+
+  // 7. Smooth Camera Tracking
+  const targetCamX = p.x - state.screenW / 2;
+  const targetCamY = p.y - state.screenH / 2;
+  const camLerp = 1 - Math.exp(-10 * dt);
+  state.camera.x += (targetCamX - state.camera.x) * camLerp;
+  state.camera.y += (targetCamY - state.camera.y) * camLerp;
+}
+
+// --- 7. RENDER PIPELINE ---
+function draw() {
+  ctx.clearRect(0, 0, state.screenW, state.screenH);
+
+  ctx.save();
+  ctx.translate(-state.camera.x, -state.camera.y);
+
+  // 1. Arena Floor & Tactical Grid
+  ctx.fillStyle = '#161b22';
+  ctx.fillRect(0, 0, CONFIG.world.width, CONFIG.world.height);
+
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  const gs = CONFIG.world.gridSize;
+  ctx.beginPath();
+  for (let x = gs; x < CONFIG.world.width; x += gs) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, CONFIG.world.height);
+  }
+  for (let y = gs; y < CONFIG.world.height; y += gs) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(CONFIG.world.width, y);
+  }
+  ctx.stroke();
+
+  // Arena Outer Border
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(0, 0, CONFIG.world.width, CONFIG.world.height);
+
+  const p = state.player;
+
+  // 2. Player Attack Range Circle (subtle tactical ring)
+  ctx.strokeStyle = 'rgba(88, 166, 255, 0.12)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, CONFIG.player.attackRange, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 3. Draw Target Dummies
+  for (const d of state.dummies) {
+    if (d.respawnTimer > 0) {
+      // Respawn ghost indicator
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${d.respawnTimer.toFixed(1)}s`, d.x, d.y + 4);
+      continue;
+    }
+
+    // Active Target Lock-On Ring
+    if (p.target === d) {
+      ctx.strokeStyle = '#ef476f';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.radius + 9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Dummy Body
+    ctx.fillStyle = d.hitFlash > 0 ? '#ffffff' : '#e63946';
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#9d0208';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Health Bar above Dummy
+    const barW = 48;
+    const barH = 6;
+    const barX = d.x - barW / 2;
+    const barY = d.y - d.radius - 16;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = '#06d6a0';
+    ctx.fillRect(barX, barY, barW * (d.hp / d.maxHp), barH);
+  }
+
+  // 4. Draw Arrows
+  for (const proj of state.projectiles) {
+    ctx.save();
+    ctx.translate(proj.x, proj.y);
+    ctx.rotate(proj.angle);
+
+    // Arrow shaft
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-12, 0);
+    ctx.lineTo(6, 0);
+    ctx.stroke();
+
+    // Arrowhead
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(3, -4);
+    ctx.lineTo(3, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // 5. Draw Player (Archer + Animated Bow)
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.aimAngle);
+
+  // Bow & String (with recoil pullback)
+  const recoilOffset = p.bowRecoil * 4;
+  const bowX = 12 - recoilOffset;
+
+  // Bow String
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(bowX - 2, -16);
+  ctx.lineTo(bowX - 6 - recoilOffset * 1.5, 0);
+  ctx.lineTo(bowX - 2, 16);
+  ctx.stroke();
+
+  // Bow Arc
+  ctx.strokeStyle = '#06d6a0';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.arc(bowX - 4, 0, 17, -Math.PI * 0.42, Math.PI * 0.42);
+  ctx.stroke();
+
+  // Archer Body
+  ctx.fillStyle = '#3a86ff';
+  ctx.beginPath();
+  ctx.arc(0, 0, CONFIG.player.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#e0fbfc';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Visor / Direction Eyes
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(8, -6, 3, 0, Math.PI * 2);
+  ctx.arc(8, 6, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+
+  // 6. Draw Hit Particles & Floating Damage Text
+  for (const pt of state.particles) {
+    ctx.fillStyle = pt.color;
+    ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  for (const ft of state.floatingTexts) {
+    ctx.save();
+    ctx.globalAlpha = ft.alpha;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#000000';
+    ctx.fillText(ft.text, ft.x + 1, ft.y + 1);
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.restore();
+  }
+
+  ctx.restore(); // End world space
+
+  // --- 8. HUD & FLOATING JOYSTICK (Screen Space) ---
+  // Top Banner
+  ctx.fillStyle = 'rgba(13, 17, 23, 0.75)';
+  ctx.fillRect(12, 12, 220, 52);
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(12, 12, 220, 52);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('WAVE 50 • MILESTONE 1', 24, 34);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Touch & drag anywhere to move', 24, 52);
+
+  // Virtual Joystick UI
+  if (input.joy.active) {
+    // Base ring
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(input.joy.startX, input.joy.startY, CONFIG.joystick.maxRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Stem line
+    ctx.strokeStyle = 'rgba(58, 134, 255, 0.45)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(input.joy.startX, input.joy.startY);
+    ctx.lineTo(input.joy.currX, input.joy.currY);
+    ctx.stroke();
+
+    // Thumb knob
+    ctx.fillStyle = 'rgba(58, 134, 255, 0.85)';
+    ctx.beginPath();
+    ctx.arc(input.joy.currX, input.joy.currY, CONFIG.joystick.knobRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+// --- 9. MAIN LOOP ---
+function gameLoop(now) {
+  // Clamp dt to max 0.05s (20fps floor) to prevent huge jumps if tab is backgrounded
+  const dt = Math.min((now - state.lastTime) / 1000, 0.05);
+  state.lastTime = now;
+
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
