@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>Wave 50 - Milestone 2.1</title>
+  <title>Wave 50 - Milestone 3</title>
   <style>
     * {
       box-sizing: border-box;
@@ -38,7 +38,7 @@
       z-index: 10;
     }
     .hud-btn {
-      background: rgba(13, 17, 23, 0.85);
+      background: rgba(13, 17, 23, 0.88);
       color: #ffffff;
       border: 1.5px solid #30363d;
       border-radius: 6px;
@@ -50,6 +50,71 @@
     .hud-btn:active {
       background: #3a86ff;
     }
+
+    /* Skill Upgrade Modal */
+    #upgradeModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 14, 20, 0.85);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      z-index: 25;
+      backdrop-filter: blur(4px);
+    }
+    #upgradeModal.active {
+      display: flex;
+    }
+    .modal-title {
+      color: #ffd166;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    .modal-subtitle {
+      color: #8b949e;
+      font-size: 14px;
+      margin-bottom: 18px;
+      text-align: center;
+    }
+    .card-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .skill-card {
+      background: linear-gradient(135deg, #161b22 0%, #1f2733 100%);
+      border: 2px solid #3a86ff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      color: #ffffff;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+      transition: transform 0.1s ease, border-color 0.1s ease;
+    }
+    .skill-card:active {
+      transform: scale(0.97);
+      border-color: #ffd166;
+    }
+    .skill-name {
+      font-size: 16px;
+      font-weight: 800;
+      color: #06d6a0;
+    }
+    .skill-desc {
+      font-size: 13px;
+      color: #c9d1d9;
+      line-height: 1.35;
+    }
   </style>
 </head>
 <body>
@@ -59,38 +124,49 @@
   <button class="hud-btn" id="zoomInBtn">Zoom +</button>
 </div>
 
+<!-- 3-Card Skill Upgrade Overlay -->
+<div id="upgradeModal">
+  <div class="modal-title" id="modalWaveTitle">WAVE CLEARED!</div>
+  <div class="modal-subtitle">Tap an ability to upgrade your archer</div>
+  <div class="card-container" id="cardContainer"></div>
+</div>
+
 <canvas id="gameCanvas"></canvas>
 
 <script>
 /**
  * ==========================================
- * WAVE 50 - MILESTONE 2.1: REBALANCED COMBAT & ZOOMED-OUT CAMERA
+ * WAVE 50 - MILESTONE 3: WAVES 1-50 & SKILL UPGRADES
  * ==========================================
  */
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const upgradeModal = document.getElementById('upgradeModal');
+const cardContainer = document.getElementById('cardContainer');
+const modalWaveTitle = document.getElementById('modalWaveTitle');
 
 // --- 1. GAME CONFIGURATION ---
 const CONFIG = {
+  maxWaves: 50,
   world: {
     width: 1800,
     height: 1800,
     gridSize: 80
   },
   camera: {
-    zoom: 0.62,          // Zoomed out for mobile screens
+    zoom: 0.62,
     minZoom: 0.42,
     maxZoom: 0.95
   },
-  player: {
+  playerBase: {
     radius: 20,
     speed: 280,
     maxHp: 100,
-    fireRate: 2.3,       // Reduced from 3.8 so enemies aren't melted instantly
-    attackRange: 430,    // Must also be visible on screen
-    arrowSpeed: 740,
-    baseDamage: 14,      // Reduced from 28 (takes ~7-8 shots to kill a Runner)
+    fireRate: 2.3,
+    attackRange: 440,
+    arrowSpeed: 750,
+    baseDamage: 15,
     iFrameDuration: 0.45
   },
   joystick: {
@@ -102,9 +178,9 @@ const CONFIG = {
     runner: {
       type: 'runner',
       radius: 18,
-      speed: 245,        // Fast pressure chaser
-      hp: 100,
-      damage: 16,
+      speed: 240,
+      hp: 95,
+      damage: 15,
       color: '#ef476f',
       border: '#9d0208'
     },
@@ -112,28 +188,101 @@ const CONFIG = {
       type: 'shooter',
       radius: 20,
       speed: 145,
-      hp: 115,           // Survives long enough to fire multiple volleys
+      hp: 110,
       damage: 18,
       color: '#9b5de5',
       border: '#5a189a',
       preferredDist: 330,
       fireCooldown: 1.45,
-      chargeTime: 0.35,  // Snappy telegraph wind-up before firing
+      chargeTime: 0.35,
       bulletSpeed: 480
     },
     brute: {
       type: 'brute',
       radius: 30,
       speed: 165,
-      hp: 320,
-      damage: 28,
+      hp: 300,
+      damage: 26,
       color: '#f77f00',
       border: '#9b2226'
+    },
+    boss: {
+      type: 'boss',
+      radius: 42,
+      speed: 150,
+      hp: 950,
+      damage: 35,
+      color: '#d90429',
+      border: '#ffd166',
+      fireCooldown: 2.2,
+      chargeTime: 0.5,
+      bulletSpeed: 420
     }
   }
 };
 
-// Zoom UI Buttons
+// --- 2. SKILL POOL ---
+const SKILLS = [
+  {
+    id: 'front_arrow',
+    name: 'Front Arrow +1',
+    desc: 'Fires an extra parallel arrow forward with every shot.',
+    apply: (p) => { p.frontArrows += 1; }
+  },
+  {
+    id: 'diag_arrows',
+    name: 'Diagonal Arrows',
+    desc: 'Fires 2 additional angled arrows (+/- 22°) on every volley.',
+    apply: (p) => { p.diagonalSets += 1; }
+  },
+  {
+    id: 'pierce',
+    name: 'Piercing Arrows',
+    desc: 'Arrows slice straight through enemies to hit targets behind them.',
+    apply: (p) => { p.pierce += 1; }
+  },
+  {
+    id: 'ricochet',
+    name: 'Bouncy Walls +1',
+    desc: 'Arrows bounce off arena boundary walls instead of breaking.',
+    apply: (p) => { p.wallBounces += 1; }
+  },
+  {
+    id: 'damage_up',
+    name: 'High Caliber (+30% DMG)',
+    desc: 'Increases arrow damage by 30%.',
+    apply: (p) => { p.damage = Math.round(p.damage * 1.3); }
+  },
+  {
+    id: 'firerate_up',
+    name: 'Rapid Fire (+25% SPD)',
+    desc: 'Draws and fires arrows 25% faster.',
+    apply: (p) => { p.fireRate = +(p.fireRate * 1.25).toFixed(2); }
+  },
+  {
+    id: 'move_speed',
+    name: 'Swift Stride (+15% Move)',
+    desc: 'Increases movement speed by 15% for easier dodging.',
+    apply: (p) => { p.speed = Math.round(p.speed * 1.15); }
+  },
+  {
+    id: 'vampirism',
+    name: 'Vampiric Strikes',
+    desc: 'Restores +4 HP every time you eliminate an enemy.',
+    apply: (p) => { p.lifesteal += 4; }
+  },
+  {
+    id: 'max_hp',
+    name: 'Combat Medic (+HP)',
+    desc: 'Increases Max HP by +30 and heals 45 HP immediately.',
+    apply: (p) => {
+      p.maxHp += 30;
+      p.hp = Math.min(p.maxHp, p.hp + 45);
+    }
+  }
+];
+
+// Zoom Controls
 document.getElementById('zoomOutBtn').addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   CONFIG.camera.zoom = Math.max(CONFIG.camera.minZoom, +(CONFIG.camera.zoom - 0.08).toFixed(2));
@@ -143,16 +292,22 @@ document.getElementById('zoomInBtn').addEventListener('pointerdown', (e) => {
   CONFIG.camera.zoom = Math.min(CONFIG.camera.maxZoom, +(CONFIG.camera.zoom + 0.08).toFixed(2));
 });
 
-// --- 2. CORE STATE ---
+// --- 3. CORE STATE ---
 const state = {
   screenW: window.innerWidth,
   screenH: window.innerHeight,
   dpr: Math.min(window.devicePixelRatio || 1, 2),
   lastTime: performance.now(),
   gameOver: false,
+  victory: false,
+  choosingSkill: false,
+  wave: 1,
+  waveEnemiesToSpawn: 0,
+  waveTotalEnemies: 0,
+  waveBannerTimer: 0,
+  spawnTimer: 0,
   kills: 0,
   survivalTime: 0,
-  spawnTimer: 0.6,
   screenShake: 0,
   damageFlash: 0,
   camera: { x: 0, y: 0 },
@@ -160,17 +315,35 @@ const state = {
   projectiles: [],
   enemyProjectiles: [],
   enemies: [],
-  spawnPortals: [],
   pickups: [],
   floatingTexts: [],
   particles: []
 };
 
+function startWave(waveNum) {
+  state.wave = waveNum;
+  // Wave enemy count scales from 6 on Wave 1 up to ~115 on Wave 50
+  const baseCount = Math.floor(4 + waveNum * 2.2);
+  const isBossWave = waveNum % 5 === 0;
+  state.waveTotalEnemies = isBossWave ? baseCount + 1 : baseCount;
+  state.waveEnemiesToSpawn = state.waveTotalEnemies;
+  state.spawnTimer = 0.5;
+  state.waveBannerTimer = 2.0;
+
+  if (isBossWave) {
+    spawnEnemyDirect('boss');
+    state.waveEnemiesToSpawn--;
+  }
+}
+
 function resetGame() {
   state.gameOver = false;
+  state.victory = false;
+  state.choosingSkill = false;
+  upgradeModal.classList.remove('active');
+
   state.kills = 0;
   state.survivalTime = 0;
-  state.spawnTimer = 0.8;
   state.screenShake = 0;
   state.damageFlash = 0;
 
@@ -179,8 +352,16 @@ function resetGame() {
     y: CONFIG.world.height / 2,
     vx: 0,
     vy: 0,
-    hp: CONFIG.player.maxHp,
-    maxHp: CONFIG.player.maxHp,
+    hp: CONFIG.playerBase.maxHp,
+    maxHp: CONFIG.playerBase.maxHp,
+    speed: CONFIG.playerBase.speed,
+    fireRate: CONFIG.playerBase.fireRate,
+    damage: CONFIG.playerBase.baseDamage,
+    frontArrows: 1,
+    diagonalSets: 0,
+    pierce: 0,
+    wallBounces: 0,
+    lifesteal: 0,
     moveAngle: 0,
     aimAngle: 0,
     fireCooldown: 0,
@@ -197,20 +378,14 @@ function resetGame() {
   state.projectiles = [];
   state.enemyProjectiles = [];
   state.enemies = [];
-  state.spawnPortals = [];
   state.pickups = [];
   state.floatingTexts = [];
   state.particles = [];
 
-  // Initial wave of 5 enemies
-  queueEnemySpawn('runner');
-  queueEnemySpawn('runner');
-  queueEnemySpawn('shooter');
-  queueEnemySpawn('shooter');
-  queueEnemySpawn('brute');
+  startWave(1);
 }
 
-// --- 3. HIGH-DPI RESIZE HANDLER ---
+// --- 4. HIGH-DPI RESIZE HANDLER ---
 function resizeCanvas() {
   state.screenW = window.innerWidth;
   state.screenH = window.innerHeight;
@@ -223,7 +398,7 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// --- 4. INPUT SYSTEM (Touch Joystick + Mouse Drag + WASD) ---
+// --- 5. INPUT SYSTEM ---
 const input = {
   joy: {
     active: false,
@@ -239,7 +414,8 @@ const input = {
 };
 
 function startJoystick(id, x, y) {
-  if (state.gameOver) {
+  if (state.choosingSkill) return;
+  if (state.gameOver || state.victory) {
     resetGame();
     return;
   }
@@ -281,7 +457,7 @@ function endJoystick() {
 }
 
 window.addEventListener('touchstart', (e) => {
-  if (e.target.tagName === 'BUTTON') return;
+  if (e.target.closest('#zoomControls') || e.target.closest('#upgradeModal')) return;
   e.preventDefault();
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i];
@@ -293,7 +469,7 @@ window.addEventListener('touchstart', (e) => {
 }, { passive: false });
 
 window.addEventListener('touchmove', (e) => {
-  if (e.target.tagName === 'BUTTON') return;
+  if (e.target.closest('#zoomControls') || e.target.closest('#upgradeModal')) return;
   e.preventDefault();
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i];
@@ -316,7 +492,7 @@ window.addEventListener('touchend', handleTouchEnd, { passive: false });
 window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
 window.addEventListener('mousedown', (e) => {
-  if (e.target.tagName === 'BUTTON') return;
+  if (e.target.closest('#zoomControls') || e.target.closest('#upgradeModal')) return;
   if (!input.joy.active) startJoystick('mouse', e.clientX, e.clientY);
 });
 window.addEventListener('mousemove', (e) => {
@@ -327,12 +503,44 @@ window.addEventListener('mouseup', () => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (state.gameOver && (e.key === ' ' || e.key === 'Enter')) resetGame();
+  if ((state.gameOver || state.victory) && (e.key === ' ' || e.key === 'Enter')) resetGame();
   input.keys[e.key.toLowerCase()] = true;
 });
 window.addEventListener('keyup', (e) => { input.keys[e.key.toLowerCase()] = false; });
 
-// --- 5. COMBAT & VISIBILITY HELPERS ---
+// --- 6. SKILL UPGRADE DRAFT UI ---
+function openSkillUpgradeModal() {
+  state.choosingSkill = true;
+  endJoystick();
+
+  modalWaveTitle.textContent = `WAVE ${state.wave} CLEARED!`;
+  cardContainer.innerHTML = '';
+
+  // Shuffle and pick 3 random skills
+  const shuffled = [...SKILLS].sort(() => Math.random() - 0.5).slice(0, 3);
+
+  shuffled.forEach(skill => {
+    const card = document.createElement('div');
+    card.className = 'skill-card';
+    card.innerHTML = `
+      <div class="skill-name">${skill.name}</div>
+      <div class="skill-desc">${skill.desc}</div>
+    `;
+    card.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      skill.apply(state.player);
+      spawnFloatingText(state.player.x, state.player.y - 30, skill.name, '#06d6a0');
+      state.choosingSkill = false;
+      upgradeModal.classList.remove('active');
+      startWave(state.wave + 1);
+    });
+    cardContainer.appendChild(card);
+  });
+
+  upgradeModal.classList.add('active');
+}
+
+// --- 7. COMBAT & SPAWN HELPERS ---
 function isEntityOnScreen(e) {
   const zoom = CONFIG.camera.zoom;
   const viewW = state.screenW / zoom;
@@ -376,69 +584,120 @@ function spawnHitParticles(x, y, color, count = 6) {
   }
 }
 
-function queueEnemySpawn(forcedType = null) {
+// Spawns enemy directly without any visible spawn circle
+function spawnEnemyDirect(forcedType = null) {
   const p = state.player;
-  const pad = 100;
+  const pad = 90;
   let x, y, dist;
   let attempts = 0;
-  // Spawn between 280px and 520px from the player so enemies enter the fight quickly
+
   do {
     const angle = Math.random() * Math.PI * 2;
-    const spawnDist = 280 + Math.random() * 240;
+    const spawnDist = 360 + Math.random() * 240;
     x = Math.max(pad, Math.min(CONFIG.world.width - pad, p.x + Math.cos(angle) * spawnDist));
     y = Math.max(pad, Math.min(CONFIG.world.height - pad, p.y + Math.sin(angle) * spawnDist));
     dist = Math.hypot(x - p.x, y - p.y);
     attempts++;
-  } while (dist < 240 && attempts < 12);
+  } while (dist < 300 && attempts < 12);
 
   let type = forcedType;
   if (!type) {
     const roll = Math.random();
-    if (roll < 0.50) type = 'runner';
-    else if (roll < 0.82) type = 'shooter';
-    else type = 'brute';
+    if (state.wave === 1) {
+      type = roll < 0.7 ? 'runner' : 'shooter';
+    } else if (roll < 0.50) {
+      type = 'runner';
+    } else if (roll < 0.82) {
+      type = 'shooter';
+    } else {
+      type = 'brute';
+    }
   }
 
-  state.spawnPortals.push({
-    x,
-    y,
-    type,
-    timer: 0.85,
-    maxTimer: 0.85
-  });
-}
+  const cfg = CONFIG.enemies[type];
+  // Scale HP & Speed with wave number
+  const hpMult = 1 + (state.wave - 1) * 0.12;
+  const speedMult = Math.min(1.45, 1 + (state.wave - 1) * 0.01);
+  const scaledHp = Math.round(cfg.hp * hpMult);
 
-function spawnEnemyFromPortal(portal) {
-  const cfg = CONFIG.enemies[portal.type];
   state.enemies.push({
     type: cfg.type,
-    x: portal.x,
-    y: portal.y,
+    x,
+    y,
     vx: 0,
     vy: 0,
     knockX: 0,
     knockY: 0,
     radius: cfg.radius,
-    speed: cfg.speed,
-    hp: cfg.hp,
-    maxHp: cfg.hp,
+    speed: cfg.speed * speedMult,
+    hp: scaledHp,
+    maxHp: scaledHp,
     damage: cfg.damage,
     color: cfg.color,
     border: cfg.border,
     hitFlash: 0,
-    fireTimer: cfg.fireCooldown ? (0.6 + Math.random() * 0.7) : 0,
+    fireTimer: cfg.fireCooldown ? (0.7 + Math.random() * 0.7) : 0,
     chargeTimer: 0,
     aimAngle: 0
   });
-  spawnHitParticles(portal.x, portal.y, cfg.color, 8);
+}
+
+function firePlayerVolley(p) {
+  const baseAngle = p.aimAngle;
+  const muzzleDist = CONFIG.playerBase.radius + 6;
+
+  // 1. Front Parallel Arrows
+  const count = p.frontArrows;
+  const spacing = 11;
+  const perpAngle = baseAngle + Math.PI / 2;
+
+  for (let i = 0; i < count; i++) {
+    const offset = (i - (count - 1) / 2) * spacing;
+    const spawnX = p.x + Math.cos(baseAngle) * muzzleDist + Math.cos(perpAngle) * offset;
+    const spawnY = p.y + Math.sin(baseAngle) * muzzleDist + Math.sin(perpAngle) * offset;
+    createPlayerArrow(spawnX, spawnY, baseAngle, p);
+  }
+
+  // 2. Diagonal Arrow Sets
+  for (let s = 1; s <= p.diagonalSets; s++) {
+    const spread = 0.38 * s; // ~22 degrees per set
+    createPlayerArrow(
+      p.x + Math.cos(baseAngle + spread) * muzzleDist,
+      p.y + Math.sin(baseAngle + spread) * muzzleDist,
+      baseAngle + spread,
+      p
+    );
+    createPlayerArrow(
+      p.x + Math.cos(baseAngle - spread) * muzzleDist,
+      p.y + Math.sin(baseAngle - spread) * muzzleDist,
+      baseAngle - spread,
+      p
+    );
+  }
+}
+
+function createPlayerArrow(x, y, angle, p) {
+  state.projectiles.push({
+    x,
+    y,
+    vx: Math.cos(angle) * CONFIG.playerBase.arrowSpeed,
+    vy: Math.sin(angle) * CONFIG.playerBase.arrowSpeed,
+    angle,
+    radius: 5,
+    damage: p.damage,
+    pierceLeft: p.pierce,
+    bouncesLeft: p.wallBounces,
+    hitIds: new Set(),
+    life: 1.35
+  });
 }
 
 function damagePlayer(amount, sourceX, sourceY) {
   const p = state.player;
-  if (p.iFrameTimer > 0 || state.gameOver) return;
+  if (p.iFrameTimer > 0 || state.gameOver || state.victory) return;
 
   p.hp = Math.max(0, p.hp - amount);
-  p.iFrameTimer = CONFIG.player.iFrameDuration;
+  p.iFrameTimer = CONFIG.playerBase.iFrameDuration;
   state.screenShake = 14;
   state.damageFlash = 0.35;
 
@@ -455,7 +714,6 @@ function damagePlayer(amount, sourceX, sourceY) {
   }
 }
 
-// Point-to-segment distance for swept projectile collision
 function distToSegment(px, py, x1, y1, x2, y2) {
   const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
   if (l2 === 0) return Math.hypot(px - x1, py - y1);
@@ -464,37 +722,41 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
 }
 
-// --- 6. UPDATE LOOP ---
+// --- 8. UPDATE LOOP ---
+let nextEnemyUid = 1;
+
 function update(dt) {
-  if (state.gameOver) return;
+  if (state.gameOver || state.victory || state.choosingSkill) return;
 
   const p = state.player;
   state.survivalTime += dt;
+  if (state.waveBannerTimer > 0) state.waveBannerTimer = Math.max(0, state.waveBannerTimer - dt);
   if (state.screenShake > 0) state.screenShake = Math.max(0, state.screenShake - dt * 30);
   if (state.damageFlash > 0) state.damageFlash = Math.max(0, state.damageFlash - dt);
   if (p.iFrameTimer > 0) p.iFrameTimer = Math.max(0, p.iFrameTimer - dt);
 
-  // 1. Faster Enemy Spawner
-  state.spawnTimer -= dt;
-  const maxActiveEnemies = 22;
-  if (state.spawnTimer <= 0) {
-    if (state.enemies.length + state.spawnPortals.length < maxActiveEnemies) {
-      queueEnemySpawn();
+  // 1. Wave Enemy Spawner (Invisible direct spawns)
+  const maxSimulEnemies = Math.min(26, 10 + state.wave * 2);
+  if (state.waveEnemiesToSpawn > 0) {
+    state.spawnTimer -= dt;
+    if (state.spawnTimer <= 0 && state.enemies.length < maxSimulEnemies) {
+      spawnEnemyDirect();
+      state.waveEnemiesToSpawn--;
+      state.spawnTimer = Math.max(0.45, 1.25 - state.wave * 0.02);
     }
-    state.spawnTimer = Math.max(0.7, 1.35 - state.survivalTime * 0.008);
+  } else if (state.enemies.length === 0) {
+    // Wave Cleared!
+    if (state.wave >= CONFIG.maxWaves) {
+      state.victory = true;
+      endJoystick();
+      return;
+    } else {
+      openSkillUpgradeModal();
+      return;
+    }
   }
 
-  // 2. Update Spawn Portals
-  for (let i = state.spawnPortals.length - 1; i >= 0; i--) {
-    const portal = state.spawnPortals[i];
-    portal.timer -= dt;
-    if (portal.timer <= 0) {
-      spawnEnemyFromPortal(portal);
-      state.spawnPortals.splice(i, 1);
-    }
-  }
-
-  // 3. Player Movement
+  // 2. Player Movement
   let moveX = input.joy.dx;
   let moveY = input.joy.dy;
 
@@ -507,8 +769,8 @@ function update(dt) {
   if (mag > CONFIG.joystick.deadzone) {
     const normX = moveX / (mag > 1 ? mag : 1);
     const normY = moveY / (mag > 1 ? mag : 1);
-    p.vx = normX * CONFIG.player.speed;
-    p.vy = normY * CONFIG.player.speed;
+    p.vx = normX * p.speed;
+    p.vy = normY * p.speed;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     p.moveAngle = Math.atan2(normY, normX);
@@ -517,11 +779,11 @@ function update(dt) {
     p.vy = 0;
   }
 
-  const pad = CONFIG.player.radius + 8;
+  const pad = CONFIG.playerBase.radius + 8;
   p.x = Math.max(pad, Math.min(CONFIG.world.width - pad, p.x));
   p.y = Math.max(pad, Math.min(CONFIG.world.height - pad, p.y));
 
-  // 4. Update Camera BEFORE Targeting so on-screen check is exact
+  // 3. Update Camera First
   const viewW = state.screenW / CONFIG.camera.zoom;
   const viewH = state.screenH / CONFIG.camera.zoom;
   const targetCamX = p.x - viewW / 2;
@@ -530,12 +792,13 @@ function update(dt) {
   state.camera.x += (targetCamX - state.camera.x) * camLerp;
   state.camera.y += (targetCamY - state.camera.y) * camLerp;
 
-  // 5. Find Closest Enemy that is BOTH in Attack Range AND Visible On-Screen
+  // 4. Target Closest On-Screen Enemy
   let closestEnemy = null;
-  let minDist = CONFIG.player.attackRange;
+  let minDist = CONFIG.playerBase.attackRange;
 
   for (const e of state.enemies) {
-    if (!isEntityOnScreen(e)) continue; // Never target off-screen enemies
+    if (!e.uid) e.uid = nextEnemyUid++;
+    if (!isEntityOnScreen(e)) continue;
     const dist = Math.hypot(e.x - p.x, e.y - p.y);
     if (dist <= minDist) {
       minDist = dist;
@@ -544,7 +807,7 @@ function update(dt) {
   }
   p.target = closestEnemy;
 
-  // 6. Auto-Aim & Continuous Firing While Moving
+  // 5. Auto-Aim & Continuous Firing
   if (p.fireCooldown > 0) p.fireCooldown -= dt;
   if (p.bowRecoil > 0) p.bowRecoil = Math.max(0, p.bowRecoil - dt * 6);
 
@@ -552,26 +815,15 @@ function update(dt) {
     p.aimAngle = Math.atan2(p.target.y - p.y, p.target.x - p.x);
 
     if (p.fireCooldown <= 0) {
-      p.fireCooldown = 1 / CONFIG.player.fireRate;
+      p.fireCooldown = 1 / p.fireRate;
       p.bowRecoil = 1;
-
-      const muzzleDist = CONFIG.player.radius + 6;
-      state.projectiles.push({
-        x: p.x + Math.cos(p.aimAngle) * muzzleDist,
-        y: p.y + Math.sin(p.aimAngle) * muzzleDist,
-        vx: Math.cos(p.aimAngle) * CONFIG.player.arrowSpeed,
-        vy: Math.sin(p.aimAngle) * CONFIG.player.arrowSpeed,
-        angle: p.aimAngle,
-        radius: 5,
-        damage: CONFIG.player.baseDamage,
-        life: 0.95
-      });
+      firePlayerVolley(p);
     }
   } else if (mag > CONFIG.joystick.deadzone) {
     p.aimAngle = p.moveAngle;
   }
 
-  // 7. Update Enemies
+  // 6. Update Enemies
   for (let i = 0; i < state.enemies.length; i++) {
     const e = state.enemies[i];
     if (e.hitFlash > 0) e.hitFlash = Math.max(0, e.hitFlash - dt);
@@ -587,9 +839,7 @@ function update(dt) {
 
     if (e.type === 'shooter') {
       const cfg = CONFIG.enemies.shooter;
-
       if (e.chargeTimer > 0) {
-        // Lock aim angle during final windup so trajectory line matches exact shot path
         e.chargeTimer -= dt;
         e.vx = 0;
         e.vy = 0;
@@ -607,7 +857,6 @@ function update(dt) {
         }
       } else {
         e.aimAngle = Math.atan2(dy, dx);
-
         if (distToPlayer > cfg.preferredDist + 50) {
           e.vx = dirX * e.speed;
           e.vy = dirY * e.speed;
@@ -620,11 +869,32 @@ function update(dt) {
         }
 
         e.fireTimer -= dt;
-        // Only start charging a shot when visible on screen and within range
         if (e.fireTimer <= 0 && distToPlayer < 650 && isEntityOnScreen(e)) {
           e.aimAngle = Math.atan2(dy, dx);
           e.chargeTimer = cfg.chargeTime;
         }
+      }
+    } else if (e.type === 'boss') {
+      const cfg = CONFIG.enemies.boss;
+      e.vx = dirX * e.speed;
+      e.vy = dirY * e.speed;
+      e.fireTimer -= dt;
+      if (e.fireTimer <= 0 && isEntityOnScreen(e)) {
+        // Boss fires an 8-orb radial ring + aimed shot
+        const baseA = Math.atan2(dy, dx);
+        for (let k = 0; k < 8; k++) {
+          const a = baseA + (k * Math.PI) / 4;
+          state.enemyProjectiles.push({
+            x: e.x + Math.cos(a) * (e.radius + 8),
+            y: e.y + Math.sin(a) * (e.radius + 8),
+            vx: Math.cos(a) * cfg.bulletSpeed,
+            vy: Math.sin(a) * cfg.bulletSpeed,
+            radius: 11,
+            damage: 20,
+            life: 4.0
+          });
+        }
+        e.fireTimer = cfg.fireCooldown;
       }
     } else {
       e.vx = dirX * e.speed;
@@ -656,30 +926,31 @@ function update(dt) {
     e.x = Math.max(epad, Math.min(CONFIG.world.width - epad, e.x));
     e.y = Math.max(epad, Math.min(CONFIG.world.height - epad, e.y));
 
-    // Melee Contact Damage
-    const finalDist = Math.hypot(p.x - e.x, p.y - e.y);
-    if (finalDist < p.radius + e.radius) {
+    if (Math.hypot(p.x - e.x, p.y - e.y) < CONFIG.playerBase.radius + e.radius) {
       damagePlayer(e.damage, e.x, e.y);
     }
   }
 
-  // 8. Update Player Arrows
+  // 7. Update Player Arrows (Supports Pierce & Wall Bounces)
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const proj = state.projectiles[i];
     proj.x += proj.vx * dt;
     proj.y += proj.vy * dt;
     proj.life -= dt;
 
-    let hit = false;
+    let destroyProj = false;
+
     for (let j = state.enemies.length - 1; j >= 0; j--) {
       const e = state.enemies[j];
+      if (proj.hitIds.has(e.uid)) continue;
+
       const dist = Math.hypot(proj.x - e.x, proj.y - e.y);
       if (dist < e.radius + proj.radius) {
+        proj.hitIds.add(e.uid);
         e.hp -= proj.damage;
         e.hitFlash = 0.1;
 
-        // Subtle knockback so enemies keep pressing forward
-        const kbForce = e.type === 'brute' ? 8 : 18;
+        const kbForce = e.type === 'boss' ? 4 : (e.type === 'brute' ? 8 : 18);
         e.knockX = Math.cos(proj.angle) * kbForce;
         e.knockY = Math.sin(proj.angle) * kbForce;
 
@@ -690,33 +961,67 @@ function update(dt) {
           state.kills++;
           spawnHitParticles(e.x, e.y, e.color, 12);
 
-          if (Math.random() < 0.20) {
+          if (p.lifesteal > 0 && p.hp < p.maxHp) {
+            p.hp = Math.min(p.maxHp, p.hp + p.lifesteal);
+            spawnFloatingText(p.x, p.y - 24, `+${p.lifesteal} HP`, '#06d6a0');
+          }
+
+          if (Math.random() < 0.18 || e.type === 'boss') {
             state.pickups.push({
               x: e.x,
               y: e.y,
               radius: 10,
-              heal: 20,
-              life: 12
+              heal: e.type === 'boss' ? 45 : 20,
+              life: 14
             });
           }
           state.enemies.splice(j, 1);
         }
-        hit = true;
-        break;
+
+        if (proj.pierceLeft > 0) {
+          proj.pierceLeft--;
+        } else {
+          destroyProj = true;
+          break;
+        }
       }
     }
 
-    if (
-      hit ||
-      proj.life <= 0 ||
-      proj.x <= 0 || proj.x >= CONFIG.world.width ||
-      proj.y <= 0 || proj.y >= CONFIG.world.height
-    ) {
+    if (destroyProj || proj.life <= 0) {
       state.projectiles.splice(i, 1);
+      continue;
+    }
+
+    // Wall Bounces
+    let bounced = false;
+    if (proj.x <= 4 || proj.x >= CONFIG.world.width - 4) {
+      if (proj.bouncesLeft > 0) {
+        proj.vx = -proj.vx;
+        proj.bouncesLeft--;
+        bounced = true;
+      } else {
+        state.projectiles.splice(i, 1);
+        continue;
+      }
+    }
+    if (proj.y <= 4 || proj.y >= CONFIG.world.height - 4) {
+      if (proj.bouncesLeft > 0) {
+        proj.vy = -proj.vy;
+        proj.bouncesLeft--;
+        bounced = true;
+      } else {
+        state.projectiles.splice(i, 1);
+        continue;
+      }
+    }
+    if (bounced) {
+      proj.angle = Math.atan2(proj.vy, proj.vx);
+      proj.x = Math.max(5, Math.min(CONFIG.world.width - 5, proj.x));
+      proj.y = Math.max(5, Math.min(CONFIG.world.height - 5, proj.y));
     }
   }
 
-  // 9. Update Enemy Projectiles (Swept Collision so fast shots never miss)
+  // 8. Update Enemy Projectiles
   for (let i = state.enemyProjectiles.length - 1; i >= 0; i--) {
     const ep = state.enemyProjectiles[i];
     const prevX = ep.x;
@@ -726,7 +1031,7 @@ function update(dt) {
     ep.life -= dt;
 
     const hitDist = distToSegment(p.x, p.y, prevX, prevY, ep.x, ep.y);
-    if (hitDist < p.radius + ep.radius) {
+    if (hitDist < CONFIG.playerBase.radius + ep.radius) {
       damagePlayer(ep.damage, ep.x, ep.y);
       state.enemyProjectiles.splice(i, 1);
       continue;
@@ -741,25 +1046,25 @@ function update(dt) {
     }
   }
 
-  // 10. Update Pickups
+  // 9. Update Pickups
   for (let i = state.pickups.length - 1; i >= 0; i--) {
     const pk = state.pickups[i];
     pk.life -= dt;
     const dist = Math.hypot(p.x - pk.x, p.y - pk.y);
-    if (dist < 140) {
-      pk.x += ((p.x - pk.x) / dist) * 340 * dt;
-      pk.y += ((p.y - pk.y) / dist) * 340 * dt;
+    if (dist < 145) {
+      pk.x += ((p.x - pk.x) / dist) * 350 * dt;
+      pk.y += ((p.y - pk.y) / dist) * 350 * dt;
     }
-    if (dist < p.radius + pk.radius) {
+    if (dist < CONFIG.playerBase.radius + pk.radius) {
       p.hp = Math.min(p.maxHp, p.hp + pk.heal);
-      spawnFloatingText(p.x, p.y - p.radius, `+${pk.heal} HP`, '#06d6a0');
+      spawnFloatingText(p.x, p.y - CONFIG.playerBase.radius, `+${pk.heal} HP`, '#06d6a0');
       state.pickups.splice(i, 1);
       continue;
     }
     if (pk.life <= 0) state.pickups.splice(i, 1);
   }
 
-  // 11. Particles & Floating Text
+  // 10. Particles & Floating Text
   for (let i = state.particles.length - 1; i >= 0; i--) {
     const pt = state.particles[i];
     pt.x += pt.vx * dt;
@@ -777,7 +1082,7 @@ function update(dt) {
   }
 }
 
-// --- 7. RENDER PIPELINE ---
+// --- 9. RENDER PIPELINE ---
 function draw() {
   ctx.clearRect(0, 0, state.screenW, state.screenH);
 
@@ -785,7 +1090,6 @@ function draw() {
   const shakeX = state.screenShake > 0 ? (Math.random() - 0.5) * state.screenShake : 0;
   const shakeY = state.screenShake > 0 ? (Math.random() - 0.5) * state.screenShake : 0;
 
-  // --- WORLD SPACE (Zoomed Out) ---
   ctx.save();
   ctx.scale(zoom, zoom);
   ctx.translate(-state.camera.x + shakeX, -state.camera.y + shakeY);
@@ -808,7 +1112,6 @@ function draw() {
   }
   ctx.stroke();
 
-  // Arena Border
   ctx.strokeStyle = '#3a86ff';
   ctx.lineWidth = 8;
   ctx.strokeRect(0, 0, CONFIG.world.width, CONFIG.world.height);
@@ -816,28 +1119,13 @@ function draw() {
   const p = state.player;
 
   // 2. Player Attack Range Ring
-  ctx.strokeStyle = 'rgba(88, 166, 255, 0.16)';
+  ctx.strokeStyle = 'rgba(88, 166, 255, 0.14)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(p.x, p.y, CONFIG.player.attackRange, 0, Math.PI * 2);
+  ctx.arc(p.x, p.y, CONFIG.playerBase.attackRange, 0, Math.PI * 2);
   ctx.stroke();
 
-  // 3. Spawn Portals
-  for (const portal of state.spawnPortals) {
-    const progress = 1 - (portal.timer / portal.maxTimer);
-    ctx.strokeStyle = 'rgba(155, 93, 229, 0.85)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(portal.x, portal.y, 26 * progress, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(155, 93, 229, 0.25)';
-    ctx.beginPath();
-    ctx.arc(portal.x, portal.y, 24, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // 4. Pickups
+  // 3. Pickups
   for (const pk of state.pickups) {
     ctx.fillStyle = '#06d6a0';
     ctx.beginPath();
@@ -848,7 +1136,7 @@ function draw() {
     ctx.stroke();
   }
 
-  // 5. Enemies
+  // 4. Enemies
   for (const e of state.enemies) {
     if (p.target === e) {
       ctx.strokeStyle = '#ef476f';
@@ -858,7 +1146,6 @@ function draw() {
       ctx.stroke();
     }
 
-    // Shooter Trajectory Warning Line
     if (e.type === 'shooter' && e.chargeTimer > 0) {
       ctx.strokeStyle = 'rgba(255, 77, 109, 0.85)';
       ctx.lineWidth = 3;
@@ -876,21 +1163,21 @@ function draw() {
     ctx.fill();
 
     ctx.strokeStyle = e.border;
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = e.type === 'boss' ? 5 : 3.5;
     ctx.stroke();
 
     // Enemy HP Bar
     const barW = e.radius * 2.2;
-    const barH = 6;
+    const barH = e.type === 'boss' ? 8 : 6;
     const barX = e.x - barW / 2;
-    const barY = e.y - e.radius - 15;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    const barY = e.y - e.radius - 16;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(barX, barY, barW, barH);
-    ctx.fillStyle = '#ef476f';
+    ctx.fillStyle = e.type === 'boss' ? '#ffd166' : '#ef476f';
     ctx.fillRect(barX, barY, barW * (e.hp / e.maxHp), barH);
   }
 
-  // 6. Enemy Projectiles (Glowing Plasma Bolts)
+  // 5. Enemy Projectiles
   for (const ep of state.enemyProjectiles) {
     ctx.fillStyle = 'rgba(255, 77, 109, 0.35)';
     ctx.beginPath();
@@ -907,13 +1194,13 @@ function draw() {
     ctx.stroke();
   }
 
-  // 7. Player Arrows
+  // 6. Player Arrows
   for (const proj of state.projectiles) {
     ctx.save();
     ctx.translate(proj.x, proj.y);
     ctx.rotate(proj.angle);
 
-    ctx.strokeStyle = '#ffd166';
+    ctx.strokeStyle = proj.pierceLeft > 0 ? '#06d6a0' : '#ffd166';
     ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.moveTo(-13, 0);
@@ -931,7 +1218,7 @@ function draw() {
     ctx.restore();
   }
 
-  // 8. Player
+  // 7. Player
   ctx.save();
   ctx.translate(p.x, p.y);
 
@@ -960,7 +1247,7 @@ function draw() {
 
   ctx.fillStyle = '#3a86ff';
   ctx.beginPath();
-  ctx.arc(0, 0, CONFIG.player.radius, 0, Math.PI * 2);
+  ctx.arc(0, 0, CONFIG.playerBase.radius, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.strokeStyle = '#e0fbfc';
@@ -979,11 +1266,11 @@ function draw() {
   const pBarW = 50;
   const pBarH = 7;
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(p.x - pBarW / 2, p.y - p.radius - 18, pBarW, pBarH);
+  ctx.fillRect(p.x - pBarW / 2, p.y - CONFIG.playerBase.radius - 18, pBarW, pBarH);
   ctx.fillStyle = '#06d6a0';
-  ctx.fillRect(p.x - pBarW / 2, p.y - p.radius - 18, pBarW * (p.hp / p.maxHp), pBarH);
+  ctx.fillRect(p.x - pBarW / 2, p.y - CONFIG.playerBase.radius - 18, pBarW * (p.hp / p.maxHp), pBarH);
 
-  // 9. Particles & Floating Damage Numbers
+  // 8. Particles & Floating Text
   for (const pt of state.particles) {
     ctx.fillStyle = pt.color;
     ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
@@ -1005,36 +1292,57 @@ function draw() {
     ctx.restore();
   }
 
-  ctx.restore(); // End Zoomed World Space
+  ctx.restore(); // End World Space
 
-  // --- 8. SCREEN-SPACE HUD & DAMAGE FLASH ---
+  // --- 10. SCREEN-SPACE HUD ---
   if (state.damageFlash > 0) {
     ctx.fillStyle = `rgba(239, 71, 111, ${state.damageFlash * 0.55})`;
     ctx.fillRect(0, 0, state.screenW, state.screenH);
   }
 
-  ctx.fillStyle = 'rgba(13, 17, 23, 0.85)';
-  ctx.fillRect(12, 12, 225, 68);
+  const remainingEnemies = state.waveEnemiesToSpawn + state.enemies.length;
+
+  ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
+  ctx.fillRect(12, 12, 240, 86);
   ctx.strokeStyle = '#30363d';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(12, 12, 225, 68);
+  ctx.strokeRect(12, 12, 240, 86);
+
+  ctx.fillStyle = '#ffd166';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`WAVE ${state.wave} / ${CONFIG.maxWaves}`, 24, 33);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 14px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(`HP: ${Math.ceil(p.hp)} / ${p.maxHp}`, 24, 34);
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText(`HP: ${Math.ceil(p.hp)} / ${p.maxHp}`, 24, 53);
 
   ctx.fillStyle = '#21262d';
-  ctx.fillRect(24, 41, 195, 8);
-  ctx.fillStyle = p.hp > 30 ? '#06d6a0' : '#ef476f';
-  ctx.fillRect(24, 41, 195 * (p.hp / p.maxHp), 8);
+  ctx.fillRect(24, 59, 210, 8);
+  ctx.fillStyle = p.hp > p.maxHp * 0.3 ? '#06d6a0' : '#ef476f';
+  ctx.fillRect(24, 59, 210 * (p.hp / p.maxHp), 8);
 
   ctx.fillStyle = '#8b949e';
   ctx.font = 'bold 12px sans-serif';
-  ctx.fillText(`Kills: ${state.kills}  •  Zoom: ${Math.round(CONFIG.camera.zoom * 100)}%`, 24, 68);
+  ctx.fillText(`Remaining: ${remainingEnemies}  •  Kills: ${state.kills}`, 24, 86);
+
+  // Wave Announcement Banner
+  if (state.waveBannerTimer > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, state.waveBannerTimer);
+    ctx.fillStyle = 'rgba(13, 17, 23, 0.78)';
+    ctx.fillRect(0, state.screenH * 0.22 - 34, state.screenW, 64);
+
+    ctx.fillStyle = state.wave % 5 === 0 ? '#ef476f' : '#ffd166';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.textAlign = 'center';
+    const title = state.wave % 5 === 0 ? `⚠️ BOSS WAVE ${state.wave} ⚠️` : `WAVE ${state.wave}`;
+    ctx.fillText(title, state.screenW / 2, state.screenH * 0.22 + 6);
+    ctx.restore();
+  }
 
   // Virtual Joystick
-  if (input.joy.active && !state.gameOver) {
+  if (input.joy.active && !state.gameOver && !state.victory && !state.choosingSkill) {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = 2.5;
@@ -1060,28 +1368,28 @@ function draw() {
     ctx.stroke();
   }
 
-  // Game Over Overlay
-  if (state.gameOver) {
-    ctx.fillStyle = 'rgba(13, 17, 23, 0.85)';
+  // Game Over or Victory Overlay
+  if (state.gameOver || state.victory) {
+    ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
     ctx.fillRect(0, 0, state.screenW, state.screenH);
 
-    ctx.fillStyle = '#ef476f';
+    ctx.fillStyle = state.victory ? '#06d6a0' : '#ef476f';
     ctx.font = 'bold 34px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('YOU FELL', state.screenW / 2, state.screenH / 2 - 30);
+    ctx.fillText(state.victory ? 'WAVE 50 CONQUERED!' : 'YOU FELL', state.screenW / 2, state.screenH / 2 - 40);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = '18px sans-serif';
-    ctx.fillText(`Enemies Defeated: ${state.kills}`, state.screenW / 2, state.screenH / 2 + 10);
-    ctx.fillText(`Survived: ${Math.floor(state.survivalTime)}s`, state.screenW / 2, state.screenH / 2 + 38);
+    ctx.fillText(`Reached Wave: ${state.wave} / ${CONFIG.maxWaves}`, state.screenW / 2, state.screenH / 2 + 2);
+    ctx.fillText(`Enemies Defeated: ${state.kills}`, state.screenW / 2, state.screenH / 2 + 30);
 
     ctx.fillStyle = '#ffd166';
     ctx.font = 'bold 16px sans-serif';
-    ctx.fillText('Tap anywhere to play again', state.screenW / 2, state.screenH / 2 + 85);
+    ctx.fillText('Tap anywhere to play again', state.screenW / 2, state.screenH / 2 + 82);
   }
 }
 
-// --- 9. MAIN LOOP ---
+// --- 11. MAIN LOOP ---
 resetGame();
 
 function gameLoop(now) {
